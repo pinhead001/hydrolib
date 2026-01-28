@@ -4,18 +4,20 @@ hydrolib.core - Core data structures and utility functions
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from enum import Enum, auto
+from functools import cached_property, lru_cache
+from typing import ClassVar, Dict, List, Optional, Tuple, Union
+
 import numpy as np
 import pandas as pd
-from scipy.special import ndtri, gammaln
 from scipy import stats
-from dataclasses import dataclass, field
-from functools import lru_cache, cached_property
-from typing import Optional, Tuple, Dict, List, Union, ClassVar
-from enum import Enum, auto
+from scipy.special import gammaln, ndtri
 
 
 class SkewMethod(Enum):
     """Skew coefficient computation method."""
+
     STATION = auto()
     WEIGHTED = auto()
     REGIONAL = auto()
@@ -23,53 +25,60 @@ class SkewMethod(Enum):
 
 class AnalysisMethod(Enum):
     """Flood frequency analysis method."""
-    MOM = auto()      # Method of Moments (traditional)
-    EMA = auto()      # Expected Moments Algorithm (B17C)
+
+    MOM = auto()  # Method of Moments (traditional)
+    EMA = auto()  # Expected Moments Algorithm (B17C)
 
 
 @dataclass
 class FlowInterval:
     """
     Represents a flow interval for EMA analysis.
-    
+
     For systematic peaks: lower = upper = observed value
     For censored data: lower and upper define the interval
     For historical peaks: perception_threshold defines detectability
     """
+
     lower: float
     upper: float
     year: int
     is_historical: bool = False
     perception_threshold: float = 0.0
-    
+
     @property
     def is_censored(self) -> bool:
         return self.lower != self.upper
-    
+
     @property
     def is_systematic(self) -> bool:
         return not self.is_historical
-    
+
     @classmethod
     def from_peak(cls, flow: float, year: int) -> FlowInterval:
         return cls(lower=flow, upper=flow, year=year)
-    
+
     @classmethod
-    def from_censored(cls, lower: float, upper: float, year: int,
-                      perception_threshold: float = 0.0) -> FlowInterval:
-        return cls(lower=lower, upper=upper, year=year,
-                  perception_threshold=perception_threshold)
-    
+    def from_censored(
+        cls, lower: float, upper: float, year: int, perception_threshold: float = 0.0
+    ) -> FlowInterval:
+        return cls(lower=lower, upper=upper, year=year, perception_threshold=perception_threshold)
+
     @classmethod
-    def from_historical(cls, flow: float, year: int, 
-                        perception_threshold: float) -> FlowInterval:
-        return cls(lower=flow, upper=flow, year=year,
-                  is_historical=True, perception_threshold=perception_threshold)
+    def from_historical(cls, flow: float, year: int, perception_threshold: float) -> FlowInterval:
+        return cls(
+            lower=flow,
+            upper=flow,
+            year=year,
+            is_historical=True,
+            perception_threshold=perception_threshold,
+        )
 
 
 @dataclass
 class EMAParameters:
     """Parameters for EMA analysis."""
+
     systematic_start: int
     systematic_end: int
     historical_start: Optional[int] = None
@@ -78,11 +87,11 @@ class EMAParameters:
     low_outlier_threshold: Optional[float] = None
     max_iterations: int = 100
     tolerance: float = 1e-6
-    
+
     @property
     def systematic_years(self) -> int:
         return self.systematic_end - self.systematic_start + 1
-    
+
     @property
     def historical_years(self) -> int:
         if self.historical_start and self.historical_end:
@@ -93,6 +102,7 @@ class EMAParameters:
 @dataclass
 class FrequencyResults:
     """Results from flood frequency analysis."""
+
     n_peaks: int
     n_systematic: int
     n_historical: int
@@ -117,6 +127,7 @@ class FrequencyResults:
 # UTILITY FUNCTIONS WITH CACHING
 # =============================================================================
 
+
 @lru_cache(maxsize=256)
 def kfactor(skew: float, aep: float) -> float:
     """
@@ -124,10 +135,10 @@ def kfactor(skew: float, aep: float) -> float:
     Uses Wilson-Hilferty approximation. Cached for performance.
     """
     z = ndtri(1 - aep)
-    
+
     if abs(skew) < 0.001:
         return z
-    
+
     k = skew / 6
     return (2 / skew) * ((1 + k * z - k * k) ** 3 - 1)
 
@@ -141,22 +152,31 @@ def kfactor_array(skew: float, aep: np.ndarray) -> np.ndarray:
 def grubbs_beck_critical_value(n: int, alpha: float = 0.10) -> float:
     """Compute Grubbs-Beck critical value for low outlier detection."""
     exact_values = {
-        10: 2.036, 15: 2.247, 20: 2.385, 25: 2.486,
-        30: 2.563, 40: 2.682, 50: 2.768, 60: 2.837,
-        70: 2.893, 80: 2.940, 90: 2.981, 100: 3.017
+        10: 2.036,
+        15: 2.247,
+        20: 2.385,
+        25: 2.486,
+        30: 2.563,
+        40: 2.682,
+        50: 2.768,
+        60: 2.837,
+        70: 2.893,
+        80: 2.940,
+        90: 2.981,
+        100: 3.017,
     }
-    
+
     keys = sorted(exact_values.keys())
     if n <= keys[0]:
         return exact_values[keys[0]]
     if n >= keys[-1]:
         return -0.9043 + 3.345 * np.sqrt(np.log10(n)) - 0.4046 * np.log10(n)
-    
+
     for i in range(len(keys) - 1):
         if keys[i] <= n < keys[i + 1]:
             t = (n - keys[i]) / (keys[i + 1] - keys[i])
             return exact_values[keys[i]] * (1 - t) + exact_values[keys[i + 1]] * t
-    
+
     return -0.9043 + 3.345 * np.sqrt(np.log10(n)) - 0.4046 * np.log10(n)
 
 
@@ -164,17 +184,17 @@ def log_pearson3_cdf(x: float, mean: float, std: float, skew: float) -> float:
     """Compute CDF of Log-Pearson Type III distribution."""
     if x <= 0:
         return 0.0
-    
+
     log_x = np.log10(x)
-    
+
     if abs(skew) < 0.001:
         z = (log_x - mean) / std
         return stats.norm.cdf(z)
-    
-    alpha = 4 / (skew ** 2)
+
+    alpha = 4 / (skew**2)
     beta = std * abs(skew) / 2
     xi = mean - 2 * std / skew
-    
+
     if skew > 0:
         y = (log_x - xi) / beta
         if y <= 0:
@@ -191,14 +211,14 @@ def log_pearson3_ppf(p: float, mean: float, std: float, skew: float) -> float:
     """Compute quantile of Log-Pearson Type III distribution."""
     K = kfactor(skew, 1 - p)
     log_q = mean + K * std
-    return 10 ** log_q
+    return 10**log_q
 
 
 def log_pearson3_pdf(log_q: float, mean: float, std: float, skew: float) -> float:
     """Compute PDF of Log-Pearson Type III distribution in log space."""
     if abs(skew) < 0.001:
         z = (log_q - mean) / std
-        return np.exp(-z**2/2) / (std * np.sqrt(2*np.pi))
+        return np.exp(-(z**2) / 2) / (std * np.sqrt(2 * np.pi))
     else:
         alpha = 4 / skew**2
         beta = std * abs(skew) / 2
@@ -207,9 +227,9 @@ def log_pearson3_pdf(log_q: float, mean: float, std: float, skew: float) -> floa
             y = (log_q - xi) / beta
             if y <= 0:
                 return 0.0
-            return (y**(alpha-1) * np.exp(-y) / (beta * np.exp(gammaln(alpha))))
+            return y ** (alpha - 1) * np.exp(-y) / (beta * np.exp(gammaln(alpha)))
         else:
             y = (xi - log_q) / beta
             if y <= 0:
                 return 0.0
-            return (y**(alpha-1) * np.exp(-y) / (beta * np.exp(gammaln(alpha))))
+            return y ** (alpha - 1) * np.exp(-y) / (beta * np.exp(gammaln(alpha)))

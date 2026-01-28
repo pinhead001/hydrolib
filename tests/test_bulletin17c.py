@@ -2,13 +2,14 @@
 
 import numpy as np
 import pytest
+
 from hydrolib import (
-    Bulletin17C,
-    MethodOfMoments,
-    ExpectedMomentsAlgorithm,
-    kfactor,
-    grubbs_beck_critical_value,
     AnalysisMethod,
+    Bulletin17C,
+    ExpectedMomentsAlgorithm,
+    MethodOfMoments,
+    grubbs_beck_critical_value,
+    kfactor,
 )
 
 
@@ -19,7 +20,7 @@ def synthetic_peaks():
     np.random.seed(42)
     n = 50
     mean_log, std_log, skew = 4.5, 0.25, 0.3
-    
+
     alpha = 4 / skew**2
     z = (np.random.gamma(alpha, 1, n) - alpha) / np.sqrt(alpha)
     return 10 ** (mean_log + std_log * z)
@@ -36,25 +37,26 @@ class TestUtilities:
     def test_kfactor_zero_skew(self):
         """K-factor with zero skew should equal standard normal quantile."""
         from scipy.special import ndtri
+
         aep = 0.01
         assert abs(kfactor(0.0, aep) - ndtri(1 - aep)) < 0.001
-    
+
     def test_kfactor_positive_skew(self):
         """K-factor with positive skew for 1% AEP."""
         K = kfactor(0.5, 0.01)
         assert 2.0 < K < 3.0  # Reasonable range
-    
+
     def test_kfactor_cached(self):
         """Verify caching works (same result on repeated calls)."""
         k1 = kfactor(0.3, 0.01)
         k2 = kfactor(0.3, 0.01)
         assert k1 == k2
-    
+
     def test_grubbs_beck_critical_value(self):
         """Test Grubbs-Beck critical value calculation."""
         k_50 = grubbs_beck_critical_value(50)
         assert 2.7 < k_50 < 2.8
-        
+
         k_100 = grubbs_beck_critical_value(100)
         assert k_100 > k_50  # Should increase with n
 
@@ -65,101 +67,93 @@ class TestMethodOfMoments:
         """Test basic MOM analysis runs without error."""
         mom = MethodOfMoments(synthetic_peaks)
         results = mom.run_analysis()
-        
+
         assert results.n_peaks == len(synthetic_peaks)
         assert results.method == AnalysisMethod.MOM
         assert results.mean_log > 0
         assert results.std_log > 0
-    
+
     def test_with_regional_skew(self, synthetic_peaks):
         """Test MOM with regional skew weighting."""
-        mom = MethodOfMoments(
-            synthetic_peaks,
-            regional_skew=0.0,
-            regional_skew_mse=0.15
-        )
+        mom = MethodOfMoments(synthetic_peaks, regional_skew=0.0, regional_skew_mse=0.15)
         results = mom.run_analysis()
-        
+
         assert results.skew_weighted is not None
         assert results.skew_regional == 0.0
         # Weighted skew should be between station and regional
-        assert min(results.skew_station, 0.0) <= results.skew_weighted <= max(results.skew_station, 0.0)
-    
+        assert (
+            min(results.skew_station, 0.0)
+            <= results.skew_weighted
+            <= max(results.skew_station, 0.0)
+        )
+
     def test_quantiles_computed(self, synthetic_peaks):
         """Test that quantiles are computed."""
         mom = MethodOfMoments(synthetic_peaks)
         results = mom.run_analysis()
-        
+
         assert not results.quantiles.empty
-        assert 'aep' in results.quantiles.columns
-        assert 'flow_cfs' in results.quantiles.columns
-        
+        assert "aep" in results.quantiles.columns
+        assert "flow_cfs" in results.quantiles.columns
+
         # 100-year flow should be greater than 10-year
-        q10 = results.quantiles[results.quantiles['aep'] == 0.10]['flow_cfs'].values[0]
-        q100 = results.quantiles[results.quantiles['aep'] == 0.01]['flow_cfs'].values[0]
+        q10 = results.quantiles[results.quantiles["aep"] == 0.10]["flow_cfs"].values[0]
+        q100 = results.quantiles[results.quantiles["aep"] == 0.01]["flow_cfs"].values[0]
         assert q100 > q10
-    
+
     def test_confidence_limits(self, synthetic_peaks):
         """Test confidence limit computation."""
         mom = MethodOfMoments(synthetic_peaks)
         results = mom.run_analysis()
-        
+
         assert not results.confidence_limits.empty
-        assert 'lower_5pct' in results.confidence_limits.columns
-        assert 'upper_5pct' in results.confidence_limits.columns
-        
+        assert "lower_5pct" in results.confidence_limits.columns
+        assert "upper_5pct" in results.confidence_limits.columns
+
         # Upper limit should be greater than estimate
         for _, row in results.confidence_limits.iterrows():
-            assert row['lower_5pct'] < row['flow_cfs'] < row['upper_5pct']
+            assert row["lower_5pct"] < row["flow_cfs"] < row["upper_5pct"]
 
 
 # Expected Moments Algorithm tests
 class TestEMA:
     def test_basic_ema(self, synthetic_peaks, water_years):
         """Test basic EMA analysis."""
-        ema = ExpectedMomentsAlgorithm(
-            synthetic_peaks,
-            water_years=water_years
-        )
+        ema = ExpectedMomentsAlgorithm(synthetic_peaks, water_years=water_years)
         results = ema.run_analysis()
-        
+
         assert results.method == AnalysisMethod.EMA
         assert results.ema_iterations is not None
         assert results.ema_converged is not None
-    
+
     def test_ema_convergence(self, synthetic_peaks, water_years):
         """Test EMA converges."""
-        ema = ExpectedMomentsAlgorithm(
-            synthetic_peaks,
-            water_years=water_years
-        )
+        ema = ExpectedMomentsAlgorithm(synthetic_peaks, water_years=water_years)
         results = ema.run_analysis()
-        
+
         assert results.ema_converged == True
         assert results.ema_iterations < 100
-    
+
     def test_ema_with_historical(self, synthetic_peaks, water_years):
         """Test EMA with historical peaks."""
         historical = [(1936, 150000), (1955, 120000)]
-        
+
         ema = ExpectedMomentsAlgorithm(
-            synthetic_peaks,
-            water_years=water_years,
-            historical_peaks=historical
+            synthetic_peaks, water_years=water_years, historical_peaks=historical
         )
         results = ema.run_analysis()
-        
+
         assert results.n_historical == 2
         assert results.n_peaks > len(synthetic_peaks)
-    
+
     def test_ema_vs_mom_similar_without_historical(self, synthetic_peaks, water_years):
         """EMA and MOM should give similar results without historical data."""
         mom = MethodOfMoments(synthetic_peaks)
         mom_results = mom.run_analysis()
-        
+
         ema = ExpectedMomentsAlgorithm(synthetic_peaks, water_years=water_years)
         ema_results = ema.run_analysis()
-        
+
         # Mean and std should be close (within 5%)
         assert abs(ema_results.mean_log - mom_results.mean_log) / mom_results.mean_log < 0.05
         assert abs(ema_results.std_log - mom_results.std_log) / mom_results.std_log < 0.10
@@ -172,24 +166,24 @@ class TestBulletin17C:
         b17c = Bulletin17C(synthetic_peaks)
         results = b17c.run_analysis()
         assert results.method == AnalysisMethod.EMA
-    
+
     def test_mom_method_selection(self, synthetic_peaks):
         """Test MOM method selection."""
         b17c = Bulletin17C(synthetic_peaks)
-        results = b17c.run_analysis(method='mom')
+        results = b17c.run_analysis(method="mom")
         assert results.method == AnalysisMethod.MOM
-    
+
     def test_ema_method_selection(self, synthetic_peaks):
         """Test EMA method selection."""
         b17c = Bulletin17C(synthetic_peaks)
-        results = b17c.run_analysis(method='ema')
+        results = b17c.run_analysis(method="ema")
         assert results.method == AnalysisMethod.EMA
-    
+
     def test_property_access(self, synthetic_peaks):
         """Test convenience property access."""
         b17c = Bulletin17C(synthetic_peaks)
         b17c.run_analysis()
-        
+
         assert b17c.mean_log is not None
         assert b17c.std_log is not None
         assert b17c.skew_station is not None
@@ -204,14 +198,14 @@ class TestEdgeCases:
         mom = MethodOfMoments(peaks)
         results = mom.run_analysis()
         assert results.n_peaks == 10
-    
+
     def test_handles_zeros(self):
         """Test that zeros are filtered out."""
         peaks = np.array([0, 100, 200, 0, 300, 400])
         mom = MethodOfMoments(peaks)
         results = mom.run_analysis()
         assert results.n_peaks == 4
-    
+
     def test_handles_nans(self):
         """Test that NaNs are filtered out."""
         peaks = np.array([100, np.nan, 200, 300, np.nan, 400])

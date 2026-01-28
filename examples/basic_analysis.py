@@ -4,11 +4,12 @@ Basic flood frequency analysis example.
 Demonstrates both MOM and EMA methods with synthetic data.
 """
 
-import numpy as np
 import matplotlib
-matplotlib.use('Agg')  # Use non-interactive backend
+import numpy as np
 
-from hydrolib import Bulletin17C, MethodOfMoments, ExpectedMomentsAlgorithm
+matplotlib.use("Agg")  # Use non-interactive backend
+
+from hydrolib import Bulletin17C, ExpectedMomentsAlgorithm, MethodOfMoments
 
 # Generate synthetic peak flow data
 np.random.seed(42)
@@ -55,7 +56,7 @@ ema = ExpectedMomentsAlgorithm(
     water_years=water_years,
     regional_skew=0.05,
     regional_skew_mse=0.12,
-    historical_peaks=historical_peaks
+    historical_peaks=historical_peaks,
 )
 ema_results = ema.run_analysis()
 
@@ -76,11 +77,11 @@ b17c = Bulletin17C(
     water_years=water_years,
     regional_skew=0.05,
     regional_skew_mse=0.12,
-    historical_peaks=historical_peaks
+    historical_peaks=historical_peaks,
 )
 
 # Run with EMA (default)
-results = b17c.run_analysis(method='ema')
+results = b17c.run_analysis(method="ema")
 
 # Print key quantiles
 print("\nFlood Frequency Estimates:")
@@ -89,17 +90,15 @@ print("-" * 57)
 
 cl = results.confidence_limits
 for aep in [0.10, 0.04, 0.02, 0.01, 0.002]:
-    row = cl[cl['aep'] == aep].iloc[0]
-    rp = int(1/aep)
+    row = cl[cl["aep"] == aep].iloc[0]
+    rp = int(1 / aep)
     ci = f"({row['lower_5pct']:,.0f} - {row['upper_5pct']:,.0f})"
     print(f"{rp:>12} yr {row['flow_cfs']:>15,.0f} {ci:>25}")
 
 # Save plot
 print("\nSaving flood frequency curve...")
 fig = b17c.plot_frequency_curve(
-    site_name="Synthetic Example",
-    site_no="00000000",
-    save_path="flood_frequency_curve.png"
+    site_name="Synthetic Example", site_no="00000000", save_path="flood_frequency_curve.png"
 )
 print("Saved: flood_frequency_curve.png")
 
