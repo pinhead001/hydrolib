@@ -267,29 +267,3 @@ England, J.F., Jr., et al., 2019, Guidelines for determining flood flow frequenc
 - **v1.0.0**: Initial release with MOM analysis
 
 ## License
-
-## CI/CD Quick Reference
-StepCommandClean uprmdir /s /q "-p" "_del" "hydrolib.egg-info"Create CI dirmkdir .github\workflowsInstall dev depspip install -e ".[dev]"Format codeisort hydrolib/ tests/ && black hydrolib/ tests/Run testspytest tests/ -vCommitgit add . && git commit -m "message"Pushgit push origin main
-
-Troubleshooting
-CI fails on Black check:
-cmd:: Run locally to see what needs formatting
-black --check --diff hydrolib/ tests/
-
-:: Fix it
-black hydrolib/ tests/
-git add . && git commit -m "style: apply black formatting" && git push
-CI fails on Isort check:
-cmd:: Run locally
-isort --check-only --diff hydrolib/ tests/
-
-:: Fix it
-isort hydrolib/ tests/
-git add . && git commit -m "style: sort imports" && git push
-Tests fail:
-cmd:: Run locally with verbose output
-pytest tests/ -v --tb=long
-
-
-
-MIT License
