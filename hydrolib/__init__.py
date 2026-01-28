@@ -115,7 +115,7 @@ def analyze_gage(
     }
 
 
-__version__ = "2.0.0"
+__version__ = "0.0.2"
 __author__ = "HydroLib"
 
 __all__ = [
