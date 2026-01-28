@@ -621,6 +621,111 @@ class ExpectedMomentsAlgorithm(FloodFrequencyAnalysis):
     def intervals(self) -> List[FlowInterval]:
         return self._intervals.copy()
 
+    def get_perception_thresholds_table(self) -> pd.DataFrame:
+        """
+        Generate a perception thresholds table similar to HEC-SSP.
+
+        Returns a DataFrame with columns:
+        - Start Year: Beginning of the perception period
+        - End Year: End of the perception period
+        - Low Threshold (cfs): Minimum detectable flow (0 = no lower limit)
+        - High Threshold (cfs): Maximum detectable flow (inf = no upper limit)
+        - Comments: Description of the record type
+
+        Returns
+        -------
+        pd.DataFrame
+            Perception thresholds table in HEC-SSP format
+        """
+        if not self._intervals:
+            self._build_flow_intervals(self._ema_params.low_outlier_threshold or 0.0)
+
+        # Build perception periods from intervals and parameters
+        periods = []
+
+        # Get systematic record period
+        sys_start = self._ema_params.systematic_start
+        sys_end = self._ema_params.systematic_end
+        low_outlier_thresh = self._ema_params.low_outlier_threshold or 0.0
+
+        # Historical period (if exists)
+        if self._ema_params.historical_start and self._ema_params.historical_threshold:
+            hist_start = self._ema_params.historical_start
+            hist_end = self._ema_params.historical_end or (sys_start - 1)
+            hist_threshold = self._ema_params.historical_threshold
+
+            periods.append({
+                "Start Year": hist_start,
+                "End Year": hist_end,
+                "Low Threshold (cfs)": hist_threshold,
+                "High Threshold (cfs)": np.inf,
+                "Comments": "Historical Record"
+            })
+
+        # Systematic record - check for gaps and different thresholds
+        # Group consecutive years with same perception thresholds
+        systematic_intervals = [
+            i for i in self._intervals
+            if i.is_systematic and sys_start <= i.year <= sys_end
+        ]
+
+        if systematic_intervals:
+            # Sort by year
+            systematic_intervals.sort(key=lambda x: x.year)
+
+            # For systematic record, perception is typically 0 to infinity
+            # unless there are low outlier thresholds
+            periods.append({
+                "Start Year": sys_start,
+                "End Year": sys_end,
+                "Low Threshold (cfs)": 0.0,
+                "High Threshold (cfs)": np.inf,
+                "Comments": "Systematic Record"
+            })
+
+        # Check for explicitly defined perception thresholds
+        for (start, end), threshold in self._perception_thresholds.items():
+            periods.append({
+                "Start Year": start,
+                "End Year": end,
+                "Low Threshold (cfs)": threshold,
+                "High Threshold (cfs)": np.inf,
+                "Comments": "User-Defined Threshold"
+            })
+
+        # Add low outlier censoring info if applicable
+        if low_outlier_thresh > 0 and self._results and self._results.n_low_outliers > 0:
+            # Find years with low outliers
+            low_outlier_years = [
+                i.year for i in self._intervals
+                if i.is_censored and i.upper <= low_outlier_thresh
+            ]
+            if low_outlier_years:
+                periods.append({
+                    "Start Year": min(low_outlier_years),
+                    "End Year": max(low_outlier_years),
+                    "Low Threshold (cfs)": low_outlier_thresh,
+                    "High Threshold (cfs)": np.inf,
+                    "Comments": f"Low Outlier Censoring ({len(low_outlier_years)} years)"
+                })
+
+        # Sort periods by start year
+        periods.sort(key=lambda x: x["Start Year"])
+
+        # Create DataFrame
+        df = pd.DataFrame(periods)
+
+        # Format High Threshold for display
+        if not df.empty:
+            df["High Threshold (cfs)"] = df["High Threshold (cfs)"].apply(
+                lambda x: "Infinity" if np.isinf(x) else f"{x:,.0f}"
+            )
+            df["Low Threshold (cfs)"] = df["Low Threshold (cfs)"].apply(
+                lambda x: f"{x:,.0f}" if x > 0 else "0"
+            )
+
+        return df
+
 
 class Bulletin17C:
     """
@@ -760,3 +865,49 @@ class Bulletin17C:
         return self._analyzer.plot_frequency_curve(
             site_name, site_no, save_path, figsize, show_confidence
         )
+
+    def get_perception_thresholds_table(self) -> pd.DataFrame:
+        """
+        Generate a perception thresholds table similar to HEC-SSP.
+
+        This table shows the flow ranges that could be detected/recorded
+        during different time periods, following the HEC-SSP format.
+
+        Returns a DataFrame with columns:
+        - Start Year: Beginning of the perception period
+        - End Year: End of the perception period
+        - Low Threshold (cfs): Minimum detectable flow (0 = no lower limit)
+        - High Threshold (cfs): Maximum detectable flow (Infinity = no upper limit)
+        - Comments: Description of the record type (e.g., "Systematic Record",
+          "Historical Record", "Low Outlier Censoring")
+
+        Returns
+        -------
+        pd.DataFrame
+            Perception thresholds table in HEC-SSP format
+
+        Raises
+        ------
+        ValueError
+            If analysis method is MOM (perception thresholds only apply to EMA)
+
+        Examples
+        --------
+        >>> b17c = Bulletin17C(peak_flows, water_years=years)
+        >>> b17c.run_analysis(method='ema')
+        >>> table = b17c.get_perception_thresholds_table()
+        >>> print(table)
+           Start Year  End Year Low Threshold (cfs) High Threshold (cfs)          Comments
+        0        1900      1930               5000             Infinity  Historical Record
+        1        1931      2020                  0             Infinity  Systematic Record
+        """
+        if self._analyzer is None:
+            self.run_analysis()
+
+        if not isinstance(self._analyzer, ExpectedMomentsAlgorithm):
+            raise ValueError(
+                "Perception thresholds table is only available for EMA analysis. "
+                "Run analysis with method='ema' first."
+            )
+
+        return self._analyzer.get_perception_thresholds_table()
