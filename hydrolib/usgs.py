@@ -4,13 +4,16 @@ hydrolib.usgs - USGS data retrieval
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import cached_property
 from io import StringIO
-from typing import ClassVar, Optional, Tuple
+from typing import ClassVar, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import requests
+
+from .core import PeakRecord
 
 
 class USGSGage:
@@ -180,3 +183,83 @@ class USGSGage:
 
     def __repr__(self) -> str:
         return f"USGSGage(site_no='{self._site_no}', name='{self._site_name}')"
+
+    def get_peak_records(self) -> List[PeakRecord]:
+        """
+        Get peak flow data as a list of PeakRecord objects.
+
+        Returns
+        -------
+        list of PeakRecord
+            Peak flow records suitable for B17CEngine
+        """
+        if self._peak_data is None:
+            self.download_peak_flow()
+
+        records = []
+        for _, row in self._peak_data.iterrows():
+            records.append(
+                PeakRecord(
+                    year=int(row["water_year"]),
+                    flow=float(row["peak_flow_cfs"]),
+                    source="USGS",
+                )
+            )
+        return records
+
+
+def fetch_nwis_peaks(site_no: str) -> List[PeakRecord]:
+    """
+    Fetch peak flow records for a single USGS site.
+
+    Parameters
+    ----------
+    site_no : str
+        USGS site number
+
+    Returns
+    -------
+    list of PeakRecord
+        Peak flow records for the site
+    """
+    gage = USGSGage(site_no)
+    gage.download_peak_flow()
+    return gage.get_peak_records()
+
+
+def fetch_nwis_batch(
+    sites: List[str], workers: int = 6
+) -> Tuple[Dict[str, List[PeakRecord]], Dict[str, str]]:
+    """
+    Fetch peak flow records for multiple USGS sites in parallel.
+
+    Parameters
+    ----------
+    sites : list of str
+        USGS site numbers
+    workers : int
+        Number of parallel workers (default: 6)
+
+    Returns
+    -------
+    tuple
+        (successful_results, errors) where:
+        - successful_results: dict mapping site_no to list of PeakRecord
+        - errors: dict mapping site_no to error message
+    """
+    results: Dict[str, List[PeakRecord]] = {}
+    errors: Dict[str, str] = {}
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        future_to_site = {
+            executor.submit(fetch_nwis_peaks, site): site for site in sites
+        }
+
+        for future in as_completed(future_to_site):
+            site = future_to_site[future]
+            try:
+                results[site] = future.result()
+            except Exception as e:
+                errors[site] = str(e)
+
+    return results, errors
