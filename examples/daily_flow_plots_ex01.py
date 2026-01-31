@@ -59,7 +59,20 @@ fig2 = Hydrograph.plot_summary_hydrograph(
     percentiles=[10, 25, 50, 75, 90],
 )
 
+# Plot flow duration curve
+print("Plotting flow duration curve...")
+fig3, stats_df = Hydrograph.plot_flow_duration_curve(
+    daily_data,
+    site_name=gage.site_name,
+    site_no=gage.site_no,
+    save_path=os.path.join(output_dir, "flow_duration_curve.png"),
+    table_path=os.path.join(output_dir, "flow_duration_stats.csv"),
+    figsize=(8, 6),
+)
+
 print("\nFiles saved to:", output_dir)
 print("- daily_flow_data.csv")
 print("- daily_timeseries.png")
 print("- summary_hydrograph.png")
+print("- flow_duration_curve.png")
+print("- flow_duration_stats.csv")
