@@ -4,6 +4,7 @@ hydrolib.hydrograph - Hydrograph analysis and plotting
 
 from __future__ import annotations
 
+import math
 from functools import lru_cache
 from typing import ClassVar, List, Tuple
 
@@ -11,6 +12,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.dates import DateFormatter
+
+plt_color: str = "steelblue"
 
 
 class Hydrograph:
@@ -54,7 +57,7 @@ class Hydrograph:
         site_no: str = None,
         save_path: str = None,
         figsize: Tuple[int, int] = (12, 5),
-        color: str = "steelblue",
+        color: str = plt_color,
     ) -> plt.Figure:
         """Plot daily flow time series."""
         fig, ax = plt.subplots(figsize=figsize)
@@ -73,6 +76,18 @@ class Hydrograph:
 
         ax.grid(True, which="both", alpha=0.3)
         ax.xaxis.set_major_formatter(DateFormatter("%Y"))
+
+        # ax.set_yticklabels([f"{int(tick):,}" for tick in ax.get_yticks()])
+
+        # Set y-ticks to powers of 10
+        min_flow = daily_data["flow_cfs"].min()
+        max_flow = daily_data["flow_cfs"].max()
+        if min_flow > 0:
+            min_exp = math.floor(math.log10(min_flow))
+            max_exp = math.ceil(math.log10(max_flow))
+            ticks = [10**i for i in range(min_exp, max_exp + 1)]
+            ax.set_yticks(ticks)
+            ax.set_yticklabels([f"{int(tick):,}" for tick in ticks])
 
         start_yr = daily_data.index.min().year
         end_yr = daily_data.index.max().year
@@ -123,7 +138,7 @@ class Hydrograph:
                 stats_df[f"p{percentiles[0]}"],
                 stats_df[f"p{percentiles[-1]}"],
                 alpha=0.3,
-                color="blue",
+                color=plt_color,
                 label=f"{percentiles[0]}-{percentiles[-1]}th percentile",
             )
             ax.fill_between(
@@ -131,12 +146,30 @@ class Hydrograph:
                 stats_df[f"p{percentiles[1]}"],
                 stats_df[f"p{percentiles[-2]}"],
                 alpha=0.4,
-                color="blue",
+                color=plt_color,
                 label=f"{percentiles[1]}-{percentiles[-2]}th percentile",
             )
 
-        ax.plot(stats_df.index, stats_df["p50"], "b-", linewidth=2, label="Median")
-        ax.plot(stats_df.index, stats_df["mean"], "k--", linewidth=1.5, label="Mean")
+        # ax.plot(stats_df.index, stats_df["mean"], "k--", linewidth=1.5, label="Mean")
+        ax.plot(stats_df.index, stats_df["p50"], "k-", linewidth=1, label="Median")
+        ax.plot(
+            stats_df.index,
+            stats_df["min"],
+            "k:",
+            linewidth=1,
+            color=plt_color,
+            alpha=0.4,
+            label="Min",
+        )
+        ax.plot(
+            stats_df.index,
+            stats_df["max"],
+            "k:",
+            linewidth=1,
+            color=plt_color,
+            alpha=0.4,
+            label="Max",
+        )
 
         ax.set_yscale("log")
         ax.set_ylabel("Discharge (cfs)", fontsize=11)
@@ -145,6 +178,18 @@ class Hydrograph:
         ax.set_xticks(cls.MONTH_STARTS)
         ax.set_xticklabels(cls.MONTH_LABELS)
         ax.set_xlim(1, 366)
+
+        # ax.set_yticklabels([f"{int(tick):,}" for tick in ax.get_yticks()])
+
+        # Set y-ticks to powers of 10
+        min_flow = daily_data["flow_cfs"].min()
+        max_flow = daily_data["flow_cfs"].max()
+        if min_flow > 0:
+            min_exp = math.floor(math.log10(min_flow))
+            max_exp = math.ceil(math.log10(max_flow))
+            ticks = [10**i for i in range(min_exp, max_exp + 1)]
+            ax.set_yticks(ticks)
+            ax.set_yticklabels([f"{int(tick):,}" for tick in ticks])
 
         title = "Summary Hydrograph"
         if site_name and site_no:
