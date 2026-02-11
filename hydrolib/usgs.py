@@ -16,7 +16,7 @@ import requests
 from .core import PeakRecord
 
 
-class USGSGage:
+class USGSgage:
     """Class to handle USGS gage data retrieval and storage."""
 
     BASE_URL_DAILY: ClassVar[str] = "https://waterservices.usgs.gov/nwis/dv/"
@@ -182,7 +182,7 @@ class USGSGage:
         return self._peak_data
 
     def __repr__(self) -> str:
-        return f"USGSGage(site_no='{self._site_no}', name='{self._site_name}')"
+        return f"USGSgage(site_no='{self._site_no}', name='{self._site_name}')"
 
     def get_peak_records(self) -> List[PeakRecord]:
         """
@@ -222,7 +222,7 @@ def fetch_nwis_peaks(site_no: str) -> List[PeakRecord]:
     list of PeakRecord
         Peak flow records for the site
     """
-    gage = USGSGage(site_no)
+    gage = USGSgage(site_no)
     gage.download_peak_flow()
     return gage.get_peak_records()
 

@@ -43,7 +43,7 @@ from .plots import (
     plotting_positions,
 )
 from .report import HydroReport
-from .usgs import USGSGage, fetch_nwis_batch, fetch_nwis_peaks
+from .usgs import USGSgage, fetch_nwis_batch, fetch_nwis_peaks
 
 
 def analyze_gage(
@@ -77,7 +77,7 @@ def analyze_gage(
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"Downloading data for USGS {site_no}...")
-    gage = USGSGage(site_no)
+    gage = USGSgage(site_no)
 
     try:
         gage.download_daily_flow()
@@ -148,7 +148,7 @@ __all__ = [
     "lp3_quantile_peakfq",
     "compute_ci_lp3",
     # USGS data retrieval
-    "USGSGage",
+    "USGSgage",
     "fetch_nwis_peaks",
     "fetch_nwis_batch",
     # Hydrograph

@@ -14,13 +14,13 @@ import pandas as pd
 from .bulletin17c import Bulletin17C, FloodFrequencyAnalysis
 from .core import AnalysisMethod, FrequencyResults
 from .hydrograph import Hydrograph
-from .usgs import USGSGage
+from .usgs import USGSgage
 
 
 class HydroReport:
     """Generate technical report for hydrologic analysis."""
 
-    def __init__(self, gage: USGSGage, analysis: Union[Bulletin17C, FloodFrequencyAnalysis]):
+    def __init__(self, gage: USGSgage, analysis: Union[Bulletin17C, FloodFrequencyAnalysis]):
         self._gage = gage
 
         if isinstance(analysis, Bulletin17C):
