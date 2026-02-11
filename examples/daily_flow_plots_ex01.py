@@ -16,11 +16,11 @@ from hydrolib.usgs import USGSGage
 matplotlib.use("Agg")  # Use non-interactive backend for saving plots
 
 # Output directory
-output_dir = r"C:\atemp\NV5\SantaAnnaR\py\hydrolib\test01"
+output_dir = r"C:\atemp\NV5\NM_SanJuanR\hydrology\py\sta_09355500"
 os.makedirs(output_dir, exist_ok=True)
 
 # Example USGS site (Santa Ana River at MWD Crossing)
-site_no = "11066460"
+site_no = "09355500"
 
 # Initialize USGS gage
 gage = USGSGage(site_no)

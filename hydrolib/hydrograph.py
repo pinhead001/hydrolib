@@ -15,7 +15,6 @@ from matplotlib.dates import DateFormatter
 
 plt_color: str = "steelblue"
 
-
 class Hydrograph:
     """Class for hydrograph analysis and plotting."""
 
@@ -157,7 +156,7 @@ class Hydrograph:
         ax.plot(
             stats_df.index,
             stats_df["min"],
-            "k:",
+            ":",
             linewidth=1,
             color=plt_color,
             alpha=0.4,
@@ -166,7 +165,7 @@ class Hydrograph:
         ax.plot(
             stats_df.index,
             stats_df["max"],
-            "k:",
+            ":",
             linewidth=1,
             color=plt_color,
             alpha=0.4,
