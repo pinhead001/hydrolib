@@ -21,7 +21,7 @@ class Hydrograph:
     FONT_SIZE: ClassVar[int] = 12
 
     # Consistent spacing for text boxes from axes edges (axes fraction coordinates)
-    BOX_PADDING: ClassVar[float] = 0.02
+    BOX_PADDING: ClassVar[float] = 0.03
 
     MONTH_STARTS: ClassVar[List[int]] = [1, 32, 62, 93, 123, 154, 184, 215, 246, 274, 305, 335]
     MONTH_LABELS: ClassVar[List[str]] = [
