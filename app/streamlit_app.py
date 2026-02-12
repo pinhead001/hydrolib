@@ -30,62 +30,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# Custom CSS for clickable plots and modal
-st.markdown(
-    """
-    <style>
-    .plot-container {
-        cursor: pointer;
-        transition: transform 0.2s, box-shadow 0.2s;
-        border-radius: 8px;
-        padding: 5px;
-    }
-    .plot-container:hover {
-        transform: scale(1.02);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    }
-    .modal-nav-btn {
-        font-size: 24px;
-        padding: 10px 20px;
-    }
-    .plot-indicator {
-        text-align: center;
-        font-size: 14px;
-        color: #666;
-        margin-top: 10px;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-# JavaScript for arrow key navigation
-ARROW_KEY_JS = """
-<script>
-document.addEventListener('keydown', function(e) {
-    if (e.key === 'ArrowLeft') {
-        // Find and click the Previous button
-        const prevBtn = document.querySelector('[data-testid="baseButton-secondary"]:first-of-type');
-        if (prevBtn && prevBtn.innerText.includes('Previous')) {
-            prevBtn.click();
-        }
-    } else if (e.key === 'ArrowRight') {
-        // Find and click the Next button
-        const nextBtn = document.querySelector('[data-testid="baseButton-secondary"]:last-of-type');
-        if (nextBtn && nextBtn.innerText.includes('Next')) {
-            nextBtn.click();
-        }
-    } else if (e.key === 'Escape') {
-        // Find and click the Close button
-        const closeBtn = document.querySelector('[data-testid="baseButton-primary"]');
-        if (closeBtn && closeBtn.innerText.includes('Close')) {
-            closeBtn.click();
-        }
-    }
-});
-</script>
-"""
-
 st.title("USGS Hydrograph-erator")
 st.markdown(
     "Generate daily flow plots for USGS gages using [hydrolib](https://github.com/pinhead001/hydrolib)"
@@ -113,26 +57,22 @@ else:
 
 st.sidebar.markdown(f"**{len(gage_list)} gage(s) selected**")
 
-# Plot date range
-st.sidebar.header("Plot Date Range")
-col1, col2 = st.sidebar.columns(2)
-start_date = col1.date_input("Start Date", value=datetime(1970, 10, 1))
-end_date = col2.date_input("End Date", value=datetime(2025, 10, 1))
-
 # Plot options
 st.sidebar.header("Plot Options")
 show_timeseries = st.sidebar.checkbox("Daily Time Series", value=True)
 show_summary = st.sidebar.checkbox("Summary Hydrograph", value=True)
 show_fdc = st.sidebar.checkbox("Flow Duration Curve", value=True)
 
-# Run button
-run_analysis = st.sidebar.button("Generate Plots", type="primary")
+# Download button
+download_data = st.sidebar.button("Download Data", type="primary")
 
 # Initialize session state
+if "gage_data" not in st.session_state:
+    st.session_state.gage_data = {}  # Stores full daily data for each gage
+if "gage_info" not in st.session_state:
+    st.session_state.gage_info = {}  # Stores site info for each gage
 if "figures" not in st.session_state:
     st.session_state.figures = {}
-if "gage_info" not in st.session_state:
-    st.session_state.gage_info = {}
 if "expanded_gage" not in st.session_state:
     st.session_state.expanded_gage = None
 if "expanded_plot_idx" not in st.session_state:
@@ -146,7 +86,7 @@ def get_plot_list(site_no):
     return [
         name
         for name in st.session_state.figures[site_no].keys()
-        if name != "fdc_stats"
+        if not name.endswith("_stats") and not name.endswith("_data")
     ]
 
 
@@ -160,285 +100,204 @@ def get_plot_display_name(plot_key):
     return names.get(plot_key, plot_key)
 
 
-def show_expanded_plot():
-    """Display the expanded plot modal with navigation."""
-    site_no = st.session_state.expanded_gage
-    if not site_no or site_no not in st.session_state.figures:
-        return
+def format_date(dt):
+    """Format datetime as M/D/YYYY string."""
+    return f"{dt.month}/{dt.day}/{dt.year}"
 
-    plot_list = get_plot_list(site_no)
-    if not plot_list:
-        return
 
-    # Ensure index is valid
-    idx = st.session_state.expanded_plot_idx % len(plot_list)
-    current_plot = plot_list[idx]
+def generate_plots(site_no, plot_data, gage_info, por_start_str=None, por_end_str=None):
+    """Generate plots for a gage using the provided data."""
+    site_figs = {}
 
-    gage_info = st.session_state.gage_info.get(site_no, {})
-    gage_name = gage_info.get("name", "")
+    # Daily time series
+    if show_timeseries:
+        fig1 = Hydrograph.plot_daily_timeseries(
+            plot_data,
+            site_name=gage_info.get("name"),
+            site_no=site_no,
+            figsize=(10, 4),
+            por_start=por_start_str,
+            por_end=por_end_str,
+        )
+        site_figs["daily_timeseries"] = fig1
 
-    # Modal header
-    st.markdown("---")
-    st.subheader(f"USGS {site_no} - {gage_name}")
-    st.markdown(
-        f"**{get_plot_display_name(current_plot)}** ({idx + 1} of {len(plot_list)})"
+    # Summary hydrograph
+    if show_summary:
+        fig2 = Hydrograph.plot_summary_hydrograph(
+            plot_data,
+            site_name=gage_info.get("name"),
+            site_no=site_no,
+            figsize=(10, 4),
+            percentiles=[10, 25, 50, 75, 90],
+            por_start=por_start_str,
+            por_end=por_end_str,
+        )
+        site_figs["summary_hydrograph"] = fig2
+        # Store summary stats for export
+        site_figs["summary_stats"] = Hydrograph.get_summary_stats(plot_data)
+
+    # Flow duration curve
+    if show_fdc:
+        fig3, stats_df = Hydrograph.plot_flow_duration_curve(
+            plot_data,
+            site_name=gage_info.get("name"),
+            site_no=site_no,
+            figsize=(10, 4),
+            por_start=por_start_str,
+            por_end=por_end_str,
+        )
+        site_figs["flow_duration_curve"] = fig3
+        site_figs["fdc_stats"] = stats_df
+
+    return site_figs
+
+
+# Download data when button clicked
+if download_data and gage_list:
+    st.session_state.gage_data = {}
+    st.session_state.gage_info = {}
+    st.session_state.figures = {}
+
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    for idx, site_no in enumerate(gage_list):
+        status_text.text(f"Fetching site info for {site_no}...")
+
+        try:
+            # Create gage object and fetch site info (including POR)
+            gage = USGSgage(site_no)
+            gage.fetch_site_info()
+
+            status_text.text(f"Downloading data for {site_no}...")
+
+            # Download entire period of record (no date filters)
+            daily_data = gage.download_daily_flow()
+
+            # Store gage info
+            site_name_display = gage.site_name or "Unknown"
+            por_start_date = daily_data.index.min()
+            por_end_date = daily_data.index.max()
+
+            st.session_state.gage_info[site_no] = {
+                "name": site_name_display,
+                "drainage_area": gage.drainage_area,
+                "por_start": por_start_date,
+                "por_end": por_end_date,
+                "records": len(daily_data),
+            }
+
+            # Store full daily data
+            st.session_state.gage_data[site_no] = daily_data
+
+        except Exception as e:
+            st.error(f"Error processing {site_no}: {str(e)}")
+
+        progress_bar.progress((idx + 1) / len(gage_list))
+
+    status_text.text("Download complete!")
+    plt.close("all")
+
+
+# Show plot date range controls only if data is loaded
+if st.session_state.gage_data:
+    st.sidebar.header("Plot Date Range")
+    st.sidebar.markdown("*Filter plots without re-downloading*")
+
+    # Get overall date range from all loaded gages
+    all_starts = [info["por_start"] for info in st.session_state.gage_info.values()]
+    all_ends = [info["por_end"] for info in st.session_state.gage_info.values()]
+    overall_start = min(all_starts)
+    overall_end = max(all_ends)
+
+    col1, col2 = st.sidebar.columns(2)
+    plot_start = col1.date_input(
+        "Start Date",
+        value=overall_start,
+        min_value=overall_start,
+        max_value=overall_end,
+        key="plot_start",
+    )
+    plot_end = col2.date_input(
+        "End Date",
+        value=overall_end,
+        min_value=overall_start,
+        max_value=overall_end,
+        key="plot_end",
     )
 
-    # Navigation buttons
-    nav_cols = st.columns([1, 3, 1])
-
-    with nav_cols[0]:
-        if st.button("< Previous", key="prev_btn", width="stretch"):
-            st.session_state.expanded_plot_idx = (idx - 1) % len(plot_list)
-            st.rerun()
-
-    with nav_cols[2]:
-        if st.button("Next >", key="next_btn", width="stretch"):
-            st.session_state.expanded_plot_idx = (idx + 1) % len(plot_list)
-            st.rerun()
-
-    # Display the expanded plot
-    fig = st.session_state.figures[site_no][current_plot]
-    st.pyplot(fig, width="stretch")
-
-    # Show flow duration stats if viewing FDC
-    if current_plot == "flow_duration_curve" and "fdc_stats" in st.session_state.figures[site_no]:
-        with st.expander("Flow Duration Statistics"):
-            st.dataframe(st.session_state.figures[site_no]["fdc_stats"])
-
-    # Close button
-    close_cols = st.columns([2, 1, 2])
-    with close_cols[1]:
-        if st.button("Close", key="close_btn", type="primary", width="stretch"):
-            st.session_state.expanded_gage = None
-            st.session_state.expanded_plot_idx = 0
-            st.rerun()
-
-    # Plot indicator dots
-    dot_str = " ".join(
-        ["●" if i == idx else "○" for i in range(len(plot_list))]
-    )
-    st.markdown(
-        f'<div class="plot-indicator">{dot_str}<br><small>Use arrow keys or buttons to navigate, Esc to close</small></div>',
-        unsafe_allow_html=True,
-    )
-
-    # Inject arrow key JavaScript
-    st.components.v1.html(ARROW_KEY_JS, height=0)
-
-
-# Show expanded view if a plot is selected
-if st.session_state.expanded_gage:
-    show_expanded_plot()
-else:
-    # Normal view - generate and display plots
-
-    if run_analysis and gage_list:
+    # Update plots button
+    if st.sidebar.button("Update Plots", type="secondary"):
         st.session_state.figures = {}
-        st.session_state.gage_info = {}
 
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+    # Generate/display plots for each gage
+    for site_no in st.session_state.gage_data.keys():
+        gage_info = st.session_state.gage_info[site_no]
+        full_data = st.session_state.gage_data[site_no]
 
-        for idx, site_no in enumerate(gage_list):
-            status_text.text(f"Processing {site_no}...")
+        # Filter data for plot date range
+        plot_data = full_data[
+            (full_data.index >= pd.Timestamp(plot_start))
+            & (full_data.index <= pd.Timestamp(plot_end))
+        ]
 
-            try:
-                # Download data
-                gage = USGSgage(site_no)
+        if len(plot_data) == 0:
+            st.warning(f"No data for {site_no} in selected date range")
+            continue
 
-                # Fetch site info first (name, drainage area)
-                gage.fetch_site_info()
+        # Display gage header
+        st.subheader(f"USGS {site_no} - {gage_info['name']}")
 
-                daily_data = gage.download_daily_flow(
-                    start_date=start_date.strftime("%Y-%m-%d"),
-                    end_date=end_date.strftime("%Y-%m-%d"),
-                )
+        # Format POR and plot dates
+        por_str = f"{format_date(gage_info['por_start'])} - {format_date(gage_info['por_end'])}"
+        plot_str = f"{format_date(plot_data.index.min())} - {format_date(plot_data.index.max())}"
+        da_str = f"{gage_info['drainage_area']:,.1f} sq mi" if gage_info['drainage_area'] else "N/A"
 
-                # Display gage header
-                site_name_display = gage.site_name or "Unknown"
-                st.subheader(f"USGS {site_no} - {site_name_display}")
+        # Display info
+        info_cols = st.columns(4)
+        info_cols[0].markdown(f"**Drainage Area**<br><small>{da_str}</small>", unsafe_allow_html=True)
+        info_cols[1].markdown(f"**POR**<br><small>{por_str}</small>", unsafe_allow_html=True)
+        info_cols[2].markdown(f"**Plot Range**<br><small>{plot_str}</small>", unsafe_allow_html=True)
+        info_cols[3].markdown(f"**Records**<br><small>{len(plot_data):,} days</small>", unsafe_allow_html=True)
 
-                # Format POR dates
-                por_start_date = daily_data.index.min()
-                por_end_date = daily_data.index.max()
-                por_str = f"{por_start_date.month}/{por_start_date.day}/{por_start_date.year} - {por_end_date.month}/{por_end_date.day}/{por_end_date.year}"
+        # Generate plots if not cached or need refresh
+        if site_no not in st.session_state.figures:
+            # Determine if we need to show POR annotation (when plot range differs from POR)
+            por_start_str = None
+            por_end_str = None
+            if (plot_data.index.min() > gage_info['por_start'] or
+                plot_data.index.max() < gage_info['por_end']):
+                por_start_str = format_date(gage_info['por_start'])
+                por_end_str = format_date(gage_info['por_end'])
 
-                # Format drainage area
-                da_str = f"{gage.drainage_area:,.1f} sq mi" if gage.drainage_area else "N/A"
-
-                # Store gage info
-                st.session_state.gage_info[site_no] = {
-                    "name": site_name_display,
-                    "drainage_area": gage.drainage_area,
-                    "records": len(daily_data),
-                    "por": por_str,
-                }
-
-                # Display info using columns with markdown for better text control
-                info_cols = st.columns(3)
-                info_cols[0].markdown(f"**Drainage Area**<br><small>{da_str}</small>", unsafe_allow_html=True)
-                info_cols[1].markdown(f"**POR**<br><small>{por_str}</small>", unsafe_allow_html=True)
-                info_cols[2].markdown(f"**Records**<br><small>{len(daily_data):,} days</small>", unsafe_allow_html=True)
-
-                # Determine columns based on selected plots
-                plots_to_show = []
-                if show_timeseries:
-                    plots_to_show.append("timeseries")
-                if show_summary:
-                    plots_to_show.append("summary")
-                if show_fdc:
-                    plots_to_show.append("fdc")
-
-                if len(plots_to_show) > 0:
-                    cols = st.columns(len(plots_to_show))
-
-                site_figs = {}
-
-                # Check if requested date range differs from actual data
-                actual_start = daily_data.index.min()
-                actual_end = daily_data.index.max()
-                requested_start = pd.Timestamp(start_date)
-                requested_end = pd.Timestamp(end_date)
-
-                # Pass POR dates if user requested a different range than what's available
-                por_start = None
-                por_end = None
-                if actual_start > requested_start or actual_end < requested_end:
-                    por_start = f"{requested_start.month}/{requested_start.day}/{requested_start.year}"
-                    por_end = f"{requested_end.month}/{requested_end.day}/{requested_end.year}"
-
-                # Daily time series
-                if show_timeseries:
-                    fig1 = Hydrograph.plot_daily_timeseries(
-                        daily_data,
-                        site_name=gage.site_name,
-                        site_no=gage.site_no,
-                        figsize=(10, 4),
-                        por_start=por_start,
-                        por_end=por_end,
-                    )
-                    col_idx = plots_to_show.index("timeseries")
-                    with cols[col_idx]:
-                        st.pyplot(fig1)
-                        if st.button(
-                            "Expand",
-                            key=f"expand_ts_{site_no}",
-                            width="stretch",
-                        ):
-                            st.session_state.expanded_gage = site_no
-                            st.session_state.expanded_plot_idx = 0
-                            st.rerun()
-                    site_figs["daily_timeseries"] = fig1
-
-                # Summary hydrograph
-                if show_summary:
-                    fig2 = Hydrograph.plot_summary_hydrograph(
-                        daily_data,
-                        site_name=gage.site_name,
-                        site_no=gage.site_no,
-                        figsize=(10, 4),
-                        percentiles=[10, 25, 50, 75, 90],
-                        por_start=por_start,
-                        por_end=por_end,
-                    )
-                    col_idx = plots_to_show.index("summary")
-                    with cols[col_idx]:
-                        st.pyplot(fig2)
-                        if st.button(
-                            "Expand",
-                            key=f"expand_sh_{site_no}",
-                            width="stretch",
-                        ):
-                            st.session_state.expanded_gage = site_no
-                            # Find the index of summary_hydrograph in plot list
-                            st.session_state.expanded_plot_idx = (
-                                1 if show_timeseries else 0
-                            )
-                            st.rerun()
-                    site_figs["summary_hydrograph"] = fig2
-
-                # Flow duration curve
-                if show_fdc:
-                    fig3, stats_df = Hydrograph.plot_flow_duration_curve(
-                        daily_data,
-                        site_name=gage.site_name,
-                        site_no=gage.site_no,
-                        figsize=(10, 4),
-                        por_start=por_start,
-                        por_end=por_end,
-                    )
-                    col_idx = plots_to_show.index("fdc")
-                    with cols[col_idx]:
-                        st.pyplot(fig3)
-                        if st.button(
-                            "Expand",
-                            key=f"expand_fdc_{site_no}",
-                            width="stretch",
-                        ):
-                            st.session_state.expanded_gage = site_no
-                            # Find the index of flow_duration_curve in plot list
-                            fdc_idx = 0
-                            if show_timeseries:
-                                fdc_idx += 1
-                            if show_summary:
-                                fdc_idx += 1
-                            st.session_state.expanded_plot_idx = fdc_idx
-                            st.rerun()
-                    site_figs["flow_duration_curve"] = fig3
-                    site_figs["fdc_stats"] = stats_df
-
-                st.session_state.figures[site_no] = site_figs
-                st.divider()
-
-            except Exception as e:
-                st.error(f"Error processing {site_no}: {str(e)}")
-
-            progress_bar.progress((idx + 1) / len(gage_list))
-
-        status_text.text("Complete!")
-        plt.close("all")
-
-    # Show existing figures if available (after initial run)
-    elif st.session_state.figures:
-        for site_no, site_figs in st.session_state.figures.items():
-            gage_info = st.session_state.gage_info.get(site_no, {})
-
-            st.subheader(f"USGS {site_no} - {gage_info.get('name', '')}")
-
-            info_cols = st.columns(3)
-            info_cols[0].metric(
-                "Drainage Area", f"{gage_info.get('drainage_area', 'N/A')} sq mi"
+            st.session_state.figures[site_no] = generate_plots(
+                site_no, plot_data, gage_info, por_start_str, por_end_str
             )
-            info_cols[1].metric("Records", f"{gage_info.get('records', 0):,} days")
 
-            # Display plots with expand buttons
-            plot_keys = [k for k in site_figs.keys() if k != "fdc_stats"]
-            if plot_keys:
-                cols = st.columns(len(plot_keys))
-                for i, plot_key in enumerate(plot_keys):
-                    with cols[i]:
-                        st.pyplot(site_figs[plot_key])
-                        if st.button(
-                            "Expand",
-                            key=f"expand_{plot_key}_{site_no}_existing",
-                            width="stretch",
-                        ):
-                            st.session_state.expanded_gage = site_no
-                            st.session_state.expanded_plot_idx = i
-                            st.rerun()
+        site_figs = st.session_state.figures[site_no]
 
-            st.divider()
+        # Determine columns based on selected plots
+        plot_keys = [k for k in site_figs.keys() if not k.endswith("_stats")]
+        if plot_keys:
+            cols = st.columns(len(plot_keys))
+            for i, plot_key in enumerate(plot_keys):
+                with cols[i]:
+                    st.pyplot(site_figs[plot_key])
 
-# Download section
-if st.session_state.figures and not st.session_state.expanded_gage:
-    st.sidebar.header("Download")
+        st.divider()
 
-    # Select which gages to download
+    plt.close("all")
+
+
+# Export section
+if st.session_state.gage_data:
+    st.sidebar.header("Export")
+
+    # Select which gages to export
     selected_gages = st.sidebar.multiselect(
-        "Select gages to download",
-        options=list(st.session_state.figures.keys()),
-        default=list(st.session_state.figures.keys()),
+        "Select gages to export",
+        options=list(st.session_state.gage_data.keys()),
+        default=list(st.session_state.gage_data.keys()),
     )
 
     if selected_gages:
@@ -447,13 +306,23 @@ if st.session_state.figures and not st.session_state.expanded_gage:
 
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
             for site_no in selected_gages:
-                site_figs = st.session_state.figures[site_no]
+                gage_info = st.session_state.gage_info[site_no]
+                full_data = st.session_state.gage_data[site_no]
+                site_figs = st.session_state.figures.get(site_no, {})
 
+                # Export daily flow data CSV
+                csv_buffer = io.StringIO()
+                export_df = full_data.copy()
+                export_df.index.name = "date"
+                export_df.to_csv(csv_buffer)
+                zf.writestr(f"{site_no}/daily_flow.csv", csv_buffer.getvalue())
+
+                # Export plots as PNG
                 for name, fig in site_figs.items():
-                    if name == "fdc_stats":
-                        # Save CSV
+                    if name.endswith("_stats"):
+                        # Export stats as CSV
                         csv_buffer = io.StringIO()
-                        fig.to_csv(csv_buffer)
+                        fig.to_csv(csv_buffer, index=False)
                         zf.writestr(f"{site_no}/{name}.csv", csv_buffer.getvalue())
                     else:
                         # Save PNG
@@ -464,12 +333,19 @@ if st.session_state.figures and not st.session_state.expanded_gage:
                         img_buffer.seek(0)
                         zf.writestr(f"{site_no}/{name}.png", img_buffer.read())
 
+                # Export summary stats if not already in figures
+                if "summary_stats" not in site_figs and show_summary:
+                    summary_stats = Hydrograph.get_summary_stats(full_data)
+                    csv_buffer = io.StringIO()
+                    summary_stats.to_csv(csv_buffer, index=False)
+                    zf.writestr(f"{site_no}/summary_stats.csv", csv_buffer.getvalue())
+
         zip_buffer.seek(0)
 
         st.sidebar.download_button(
             label=f"Download {len(selected_gages)} Gage(s) as ZIP",
             data=zip_buffer,
-            file_name=f"usgs_plots_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+            file_name=f"usgs_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
             mime="application/zip",
         )
 

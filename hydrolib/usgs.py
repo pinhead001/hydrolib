@@ -29,6 +29,8 @@ class USGSgage:
         self._drainage_area: Optional[float] = None
         self._daily_data: Optional[pd.DataFrame] = None
         self._peak_data: Optional[pd.DataFrame] = None
+        self._daily_por_start: Optional[str] = None
+        self._daily_por_end: Optional[str] = None
 
     @property
     def site_no(self) -> str:
@@ -66,6 +68,14 @@ class USGSgage:
     def peak_data(self, value: pd.DataFrame):
         self._peak_data = value
 
+    @property
+    def daily_por_start(self) -> Optional[str]:
+        return self._daily_por_start
+
+    @property
+    def daily_por_end(self) -> Optional[str]:
+        return self._daily_por_end
+
     @cached_property
     def period_of_record(self) -> Optional[Tuple[int, int]]:
         if self._peak_data is not None:
@@ -76,11 +86,13 @@ class USGSgage:
         return None
 
     def fetch_site_info(self) -> None:
-        """Fetch site information (name, drainage area) from USGS Site Service."""
+        """Fetch site information (name, drainage area, POR) from USGS Site Service."""
         params = {
             "format": "rdb",
             "sites": self._site_no,
             "siteOutput": "expanded",
+            "seriesCatalogOutput": "true",
+            "parameterCd": "00060",  # Discharge
         }
 
         try:
@@ -101,6 +113,15 @@ class USGSgage:
                         self._drainage_area = float(df["drain_area_va"].iloc[0])
                     except (ValueError, TypeError):
                         pass
+
+                # Get daily value POR (data_type_cd == 'dv' for daily values)
+                if "data_type_cd" in df.columns:
+                    dv_rows = df[df["data_type_cd"] == "dv"]
+                    if len(dv_rows) > 0:
+                        if "begin_date" in df.columns:
+                            self._daily_por_start = str(dv_rows["begin_date"].iloc[0])
+                        if "end_date" in df.columns:
+                            self._daily_por_end = str(dv_rows["end_date"].iloc[0])
         except Exception:
             pass  # Silently fail, will use fallback from daily/peak data
 

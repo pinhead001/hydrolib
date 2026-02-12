@@ -250,6 +250,31 @@ class Hydrograph:
         return fig
 
     @classmethod
+    def get_summary_stats(
+        cls,
+        daily_data: pd.DataFrame,
+        percentiles: List[int] = None,
+    ) -> pd.DataFrame:
+        """Compute summary hydrograph statistics by day of water year.
+
+        Returns a DataFrame with columns for each statistic (mean, min, max, percentiles)
+        and rows for each day of the water year (1-366).
+        """
+        if percentiles is None:
+            percentiles = [10, 25, 50, 75, 90]
+
+        df = daily_data.copy()
+        df["dowy"] = cls._compute_dowy_series(df.index)
+
+        stats_df = df.groupby("dowy")["flow_cfs"].agg(
+            ["mean", "min", "max"] + [lambda x, p=p: np.nanpercentile(x, p) for p in percentiles]
+        )
+        stats_df.columns = ["mean", "min", "max"] + [f"p{p}" for p in percentiles]
+        stats_df.index.name = "day_of_water_year"
+
+        return stats_df.reset_index()
+
+    @classmethod
     def plot_flow_duration_curve(
         cls,
         daily_data: pd.DataFrame,
