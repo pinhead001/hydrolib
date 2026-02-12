@@ -294,8 +294,8 @@ else:
                 por_start = None
                 por_end = None
                 if actual_start > requested_start or actual_end < requested_end:
-                    por_start = requested_start.strftime("%-m/%-d/%Y")
-                    por_end = requested_end.strftime("%-m/%-d/%Y")
+                    por_start = f"{requested_start.month}/{requested_start.day}/{requested_start.year}"
+                    por_end = f"{requested_end.month}/{requested_end.day}/{requested_end.year}"
 
                 # Daily time series
                 if show_timeseries:

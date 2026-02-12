@@ -94,9 +94,11 @@ class Hydrograph:
             ax.set_yticks(ticks)
             ax.set_yticklabels([f"{int(tick):,}" for tick in ticks])
 
-        # Format dates for annotation
-        plot_start = daily_data.index.min().strftime("%-m/%-d/%Y")
-        plot_end = daily_data.index.max().strftime("%-m/%-d/%Y")
+        # Format dates for annotation (cross-platform, no leading zeros)
+        d_min = daily_data.index.min()
+        d_max = daily_data.index.max()
+        plot_start = f"{d_min.month}/{d_min.day}/{d_min.year}"
+        plot_end = f"{d_max.month}/{d_max.day}/{d_max.year}"
 
         # Build annotation text
         if por_start and por_end:
@@ -217,9 +219,11 @@ class Hydrograph:
         )
         ax.grid(True, which="both", alpha=0.3)
 
-        # Format dates for annotation
-        plot_start = daily_data.index.min().strftime("%-m/%-d/%Y")
-        plot_end = daily_data.index.max().strftime("%-m/%-d/%Y")
+        # Format dates for annotation (cross-platform, no leading zeros)
+        d_min = daily_data.index.min()
+        d_max = daily_data.index.max()
+        plot_start = f"{d_min.month}/{d_min.day}/{d_min.year}"
+        plot_end = f"{d_max.month}/{d_max.day}/{d_max.year}"
         n_years = len(df.index.year.unique())
 
         # Build annotation text
@@ -294,9 +298,11 @@ class Hydrograph:
         ax.set_xlim(0, 100)
         ax.set_xticks([0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100])
 
-        # Format dates for annotation
-        plot_start = daily_data.index.min().strftime("%-m/%-d/%Y")
-        plot_end = daily_data.index.max().strftime("%-m/%-d/%Y")
+        # Format dates for annotation (cross-platform, no leading zeros)
+        d_min = daily_data.index.min()
+        d_max = daily_data.index.max()
+        plot_start = f"{d_min.month}/{d_min.day}/{d_min.year}"
+        plot_end = f"{d_max.month}/{d_max.day}/{d_max.year}"
         n_years = len(daily_data.index.year.unique())
 
         # Build annotation text
