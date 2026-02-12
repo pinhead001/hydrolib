@@ -171,8 +171,11 @@ if download_data and gage_list:
 
             status_text.text(f"Downloading data for {site_no}...")
 
-            # Download entire period of record (no date filters)
-            daily_data = gage.download_daily_flow()
+            # Download entire period of record using POR dates from site info
+            # USGS API returns limited data without date range, so use POR dates
+            start_dt = gage.daily_por_start if gage.daily_por_start else "1900-01-01"
+            end_dt = gage.daily_por_end if gage.daily_por_end else None
+            daily_data = gage.download_daily_flow(start_date=start_dt, end_date=end_dt)
 
             # Store gage info
             site_name_display = gage.site_name or "Unknown"
