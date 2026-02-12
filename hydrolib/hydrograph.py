@@ -214,7 +214,7 @@ class Hydrograph:
 
         ax.legend(
             loc="upper right",
-            fontsize=cls.FONT_SIZE,
+            fontsize=cls.ANNOT_FONT_SIZE,  # Smaller legend font
             bbox_to_anchor=(1 - cls.BOX_PADDING, 1 - cls.BOX_PADDING),
         )
         ax.grid(True, which="both", alpha=0.3)
@@ -234,11 +234,11 @@ class Hydrograph:
 
         ax.annotate(
             annot_text,
-            xy=(cls.BOX_PADDING, cls.BOX_PADDING),
+            xy=(cls.BOX_PADDING, 1 - cls.BOX_PADDING),
             xycoords="axes fraction",
             fontsize=cls.ANNOT_FONT_SIZE,
             ha="left",
-            va="bottom",
+            va="top",
             bbox=dict(boxstyle="round", facecolor="white", alpha=0.8, pad=0.3),
         )
 
