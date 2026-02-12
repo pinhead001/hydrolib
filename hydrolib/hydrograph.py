@@ -175,3 +175,109 @@ class Hydrograph:
             fig.savefig(save_path, dpi=300, bbox_inches="tight")
 
         return fig
+
+    @classmethod
+    def plot_flow_duration_curve(
+        cls,
+        daily_data: pd.DataFrame,
+        site_name: str = None,
+        site_no: str = None,
+        save_path: str = None,
+        table_path: str = None,
+        figsize: Tuple[int, int] = (8, 6),
+    ) -> Tuple[plt.Figure, pd.DataFrame]:
+        """
+        Plot flow duration curve.
+
+        Parameters
+        ----------
+        daily_data : pd.DataFrame
+            Daily flow data with 'flow_cfs' column
+        site_name : str, optional
+            Site name for title
+        site_no : str, optional
+            Site number for title
+        save_path : str, optional
+            Path to save figure
+        table_path : str, optional
+            Path to save statistics table as CSV
+        figsize : tuple
+            Figure size
+
+        Returns
+        -------
+        tuple
+            (figure, stats_dataframe)
+        """
+        # Get flow values and sort descending
+        flows = daily_data["flow_cfs"].dropna().values
+        flows_sorted = np.sort(flows)[::-1]
+        n = len(flows_sorted)
+
+        # Calculate exceedance probability
+        ranks = np.arange(1, n + 1)
+        exceedance_prob = (ranks / (n + 1)) * 100
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=figsize)
+
+        ax.plot(exceedance_prob, flows_sorted, "b-", linewidth=1.5)
+        ax.set_yscale("log")
+        ax.set_xlabel("Percent of Time Flow is Equaled or Exceeded", fontsize=11)
+        ax.set_ylabel("Discharge (cfs)", fontsize=11)
+
+        # Title
+        title = "Flow Duration Curve"
+        if site_name and site_no:
+            title = f"Flow Duration Curve\nUSGS {site_no} - {site_name}"
+        elif site_no:
+            title = f"Flow Duration Curve - USGS {site_no}"
+        ax.set_title(title, fontsize=12, fontweight="bold")
+
+        ax.set_xlim(0, 100)
+        ax.grid(True, which="both", alpha=0.3)
+
+        # Calculate key statistics
+        percentiles = [1, 5, 10, 25, 50, 75, 90, 95, 99]
+        stats_data = []
+        for p in percentiles:
+            flow_val = np.percentile(flows, 100 - p)
+            stats_data.append({
+                "Exceedance %": p,
+                "Flow (cfs)": flow_val,
+            })
+            # Add marker on plot
+            ax.plot(p, flow_val, "ro", markersize=4)
+
+        stats_df = pd.DataFrame(stats_data)
+
+        # Add statistics annotation
+        q50 = np.percentile(flows, 50)
+        q10 = np.percentile(flows, 90)  # 10% exceedance
+        q90 = np.percentile(flows, 10)  # 90% exceedance
+
+        stats_text = (
+            f"Q50 (median): {q50:,.0f} cfs\n"
+            f"Q10 (high flow): {q10:,.0f} cfs\n"
+            f"Q90 (low flow): {q90:,.0f} cfs"
+        )
+        ax.annotate(
+            stats_text,
+            xy=(0.98, 0.98),
+            xycoords="axes fraction",
+            fontsize=9,
+            ha="right",
+            va="top",
+            family="monospace",
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.9),
+        )
+
+        plt.tight_layout()
+
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches="tight")
+
+        if table_path:
+            stats_df.to_csv(table_path, index=False)
+
+        return fig, stats_df
