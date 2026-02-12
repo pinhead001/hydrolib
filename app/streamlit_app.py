@@ -113,8 +113,8 @@ else:
 
 st.sidebar.markdown(f"**{len(gage_list)} gage(s) selected**")
 
-# Date range
-st.sidebar.header("Date Range")
+# Plot date range
+st.sidebar.header("Plot Date Range")
 col1, col2 = st.sidebar.columns(2)
 start_date = col1.date_input("Start Date", value=datetime(1970, 10, 1))
 end_date = col2.date_input("End Date", value=datetime(2025, 10, 1))
@@ -253,22 +253,25 @@ else:
 
                 st.subheader(f"USGS {site_no} - {gage.site_name}")
 
+                # Format POR dates
+                por_start_date = daily_data.index.min()
+                por_end_date = daily_data.index.max()
+                por_str = f"{por_start_date.month}/{por_start_date.day}/{por_start_date.year} - {por_end_date.month}/{por_end_date.day}/{por_end_date.year}"
+
                 # Store gage info
                 st.session_state.gage_info[site_no] = {
                     "name": gage.site_name,
                     "drainage_area": gage.drainage_area,
                     "records": len(daily_data),
+                    "por": por_str,
                 }
 
                 info_cols = st.columns(3)
                 info_cols[0].metric(
                     "Drainage Area", f"{gage.drainage_area or 'N/A'} sq mi"
                 )
-                info_cols[1].metric("Records", f"{len(daily_data):,} days")
-                info_cols[2].metric(
-                    "Period",
-                    f"{daily_data.index.min().strftime('%Y-%m-%d')} to {daily_data.index.max().strftime('%Y-%m-%d')}",
-                )
+                info_cols[1].metric("POR", por_str)
+                info_cols[2].metric("Records", f"{len(daily_data):,} days")
 
                 # Determine columns based on selected plots
                 plots_to_show = []
