@@ -21,6 +21,7 @@ class USGSgage:
 
     BASE_URL_DAILY: ClassVar[str] = "https://waterservices.usgs.gov/nwis/dv/"
     BASE_URL_PEAKS: ClassVar[str] = "https://nwis.waterdata.usgs.gov/nwis/peak"
+    BASE_URL_SITE: ClassVar[str] = "https://waterservices.usgs.gov/nwis/site/"
 
     def __init__(self, site_no: str):
         self._site_no = str(site_no).zfill(8)
@@ -73,6 +74,35 @@ class USGSgage:
                 int(self._peak_data["water_year"].max()),
             )
         return None
+
+    def fetch_site_info(self) -> None:
+        """Fetch site information (name, drainage area) from USGS Site Service."""
+        params = {
+            "format": "rdb",
+            "sites": self._site_no,
+            "siteOutput": "expanded",
+        }
+
+        try:
+            response = requests.get(self.BASE_URL_SITE, params=params, timeout=30)
+            response.raise_for_status()
+
+            lines = response.text.split("\n")
+            data_lines = [l for l in lines if not l.startswith("#") and l.strip()]
+
+            if len(data_lines) >= 2:
+                df = pd.read_csv(StringIO("\n".join(data_lines)), sep="\t", skiprows=[1])
+
+                if "station_nm" in df.columns and len(df) > 0:
+                    self._site_name = df["station_nm"].iloc[0]
+
+                if "drain_area_va" in df.columns and len(df) > 0:
+                    try:
+                        self._drainage_area = float(df["drain_area_va"].iloc[0])
+                    except (ValueError, TypeError):
+                        pass
+        except Exception:
+            pass  # Silently fail, will use fallback from daily/peak data
 
     def download_daily_flow(self, start_date: str = None, end_date: str = None) -> pd.DataFrame:
         """Download mean daily streamflow data from USGS."""

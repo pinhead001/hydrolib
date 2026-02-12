@@ -246,32 +246,40 @@ else:
             try:
                 # Download data
                 gage = USGSgage(site_no)
+
+                # Fetch site info first (name, drainage area)
+                gage.fetch_site_info()
+
                 daily_data = gage.download_daily_flow(
                     start_date=start_date.strftime("%Y-%m-%d"),
                     end_date=end_date.strftime("%Y-%m-%d"),
                 )
 
-                st.subheader(f"USGS {site_no} - {gage.site_name}")
+                # Display gage header
+                site_name_display = gage.site_name or "Unknown"
+                st.subheader(f"USGS {site_no} - {site_name_display}")
 
                 # Format POR dates
                 por_start_date = daily_data.index.min()
                 por_end_date = daily_data.index.max()
                 por_str = f"{por_start_date.month}/{por_start_date.day}/{por_start_date.year} - {por_end_date.month}/{por_end_date.day}/{por_end_date.year}"
 
+                # Format drainage area
+                da_str = f"{gage.drainage_area:,.1f} sq mi" if gage.drainage_area else "N/A"
+
                 # Store gage info
                 st.session_state.gage_info[site_no] = {
-                    "name": gage.site_name,
+                    "name": site_name_display,
                     "drainage_area": gage.drainage_area,
                     "records": len(daily_data),
                     "por": por_str,
                 }
 
+                # Display info using columns with markdown for better text control
                 info_cols = st.columns(3)
-                info_cols[0].metric(
-                    "Drainage Area", f"{gage.drainage_area or 'N/A'} sq mi"
-                )
-                info_cols[1].metric("POR", por_str)
-                info_cols[2].metric("Records", f"{len(daily_data):,} days")
+                info_cols[0].markdown(f"**Drainage Area**<br><small>{da_str}</small>", unsafe_allow_html=True)
+                info_cols[1].markdown(f"**POR**<br><small>{por_str}</small>", unsafe_allow_html=True)
+                info_cols[2].markdown(f"**Records**<br><small>{len(daily_data):,} days</small>", unsafe_allow_html=True)
 
                 # Determine columns based on selected plots
                 plots_to_show = []
