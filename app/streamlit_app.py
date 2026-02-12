@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 import matplotlib
+import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
 
