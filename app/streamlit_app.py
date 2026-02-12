@@ -85,7 +85,7 @@ document.addEventListener('keydown', function(e) {
 </script>
 """
 
-st.title("USGS Daily Flow Hydrograph Generator")
+st.title("USGS Hydrograph Generator")
 st.markdown(
     "Generate daily flow plots for USGS gages using [hydrolib](https://github.com/pinhead001/hydrolib)"
 )
