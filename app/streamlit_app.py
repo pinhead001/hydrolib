@@ -24,7 +24,7 @@ from hydrolib import Hydrograph
 from hydrolib.usgs import USGSgage
 
 st.set_page_config(
-    page_title="USGS Hydrograph Generator",
+    page_title="USGS Hydrograph-erator",
     page_icon=":ocean:",
     layout="wide",
 )
@@ -85,7 +85,7 @@ document.addEventListener('keydown', function(e) {
 </script>
 """
 
-st.title("USGS Hydrograph Generator")
+st.title("USGS Hydrograph-erator")
 st.markdown(
     "Generate daily flow plots for USGS gages using [hydrolib](https://github.com/pinhead001/hydrolib)"
 )
@@ -187,18 +187,18 @@ def show_expanded_plot():
     nav_cols = st.columns([1, 3, 1])
 
     with nav_cols[0]:
-        if st.button("< Previous", key="prev_btn", use_container_width=True):
+        if st.button("< Previous", key="prev_btn", width="stretch"):
             st.session_state.expanded_plot_idx = (idx - 1) % len(plot_list)
             st.rerun()
 
     with nav_cols[2]:
-        if st.button("Next >", key="next_btn", use_container_width=True):
+        if st.button("Next >", key="next_btn", width="stretch"):
             st.session_state.expanded_plot_idx = (idx + 1) % len(plot_list)
             st.rerun()
 
     # Display the expanded plot
     fig = st.session_state.figures[site_no][current_plot]
-    st.pyplot(fig, use_container_width=True)
+    st.pyplot(fig, width="stretch")
 
     # Show flow duration stats if viewing FDC
     if current_plot == "flow_duration_curve" and "fdc_stats" in st.session_state.figures[site_no]:
@@ -208,7 +208,7 @@ def show_expanded_plot():
     # Close button
     close_cols = st.columns([2, 1, 2])
     with close_cols[1]:
-        if st.button("Close", key="close_btn", type="primary", use_container_width=True):
+        if st.button("Close", key="close_btn", type="primary", width="stretch"):
             st.session_state.expanded_gage = None
             st.session_state.expanded_plot_idx = 0
             st.rerun()
@@ -297,7 +297,7 @@ else:
                         if st.button(
                             "Expand",
                             key=f"expand_ts_{site_no}",
-                            use_container_width=True,
+                            width="stretch",
                         ):
                             st.session_state.expanded_gage = site_no
                             st.session_state.expanded_plot_idx = 0
@@ -319,7 +319,7 @@ else:
                         if st.button(
                             "Expand",
                             key=f"expand_sh_{site_no}",
-                            use_container_width=True,
+                            width="stretch",
                         ):
                             st.session_state.expanded_gage = site_no
                             # Find the index of summary_hydrograph in plot list
@@ -343,7 +343,7 @@ else:
                         if st.button(
                             "Expand",
                             key=f"expand_fdc_{site_no}",
-                            use_container_width=True,
+                            width="stretch",
                         ):
                             st.session_state.expanded_gage = site_no
                             # Find the index of flow_duration_curve in plot list
@@ -391,7 +391,7 @@ else:
                         if st.button(
                             "Expand",
                             key=f"expand_{plot_key}_{site_no}_existing",
-                            use_container_width=True,
+                            width="stretch",
                         ):
                             st.session_state.expanded_gage = site_no
                             st.session_state.expanded_plot_idx = i
