@@ -20,6 +20,10 @@ class Hydrograph:
 
     FONT_SIZE: ClassVar[int] = 12
 
+    # Consistent spacing for annotations (axes fraction coordinates)
+    ANNOT_PADDING: ClassVar[float] = 0.02  # Padding from axes edges
+    LEGEND_PADDING: ClassVar[float] = 0.02  # Padding for legend
+
     MONTH_STARTS: ClassVar[List[int]] = [1, 32, 62, 93, 123, 154, 184, 215, 246, 274, 305, 335]
     MONTH_LABELS: ClassVar[List[str]] = [
         "Oct",
@@ -92,7 +96,7 @@ class Hydrograph:
         end_yr = daily_data.index.max().year
         ax.annotate(
             f"Period of Record: {start_yr}-{end_yr}",
-            xy=(0.02, 0.98),
+            xy=(cls.ANNOT_PADDING, 1 - cls.ANNOT_PADDING),
             xycoords="axes fraction",
             fontsize=cls.FONT_SIZE,
             ha="left",
@@ -194,7 +198,11 @@ class Hydrograph:
             title = f"Summary Hydrograph - USGS {site_no}"
         ax.set_title(title, fontsize=cls.FONT_SIZE, fontweight="bold")
 
-        ax.legend(loc="upper right", fontsize=cls.FONT_SIZE)
+        ax.legend(
+            loc="upper right",
+            fontsize=cls.FONT_SIZE,
+            bbox_to_anchor=(1 - cls.LEGEND_PADDING, 1 - cls.LEGEND_PADDING),
+        )
         ax.grid(True, which="both", alpha=0.3)
 
         start_yr = daily_data.index.min().year
@@ -202,7 +210,7 @@ class Hydrograph:
         n_years = len(df.index.year.unique())
         ax.annotate(
             f"Period of Record: {start_yr}-{end_yr} ({n_years} years)",
-            xy=(0.02, 0.02),
+            xy=(cls.ANNOT_PADDING, cls.ANNOT_PADDING),
             xycoords="axes fraction",
             fontsize=cls.FONT_SIZE,
             ha="left",
@@ -269,7 +277,7 @@ class Hydrograph:
         n_years = len(daily_data.index.year.unique())
         ax.annotate(
             f"Period of Record: {start_yr}-{end_yr} ({n_years} years)",
-            xy=(0.02, 0.98),
+            xy=(cls.ANNOT_PADDING, 1 - cls.ANNOT_PADDING),
             xycoords="axes fraction",
             fontsize=cls.FONT_SIZE,
             ha="left",
