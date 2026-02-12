@@ -5,8 +5,10 @@ Run with: streamlit run app/streamlit_app.py
 """
 
 import io
+import sys
 import zipfile
 from datetime import datetime
+from pathlib import Path
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -14,12 +16,15 @@ import streamlit as st
 
 matplotlib.use("Agg")  # Use non-interactive backend
 
+# Add parent directory to path for hydrolib import (needed for Streamlit Cloud)
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 # Import hydrolib
 from hydrolib import Hydrograph
 from hydrolib.usgs import USGSgage
 
 st.set_page_config(
-    page_title="USGS Daily Flow Plots",
+    page_title="USGS Hydrograph Generator",
     page_icon=":ocean:",
     layout="wide",
 )
