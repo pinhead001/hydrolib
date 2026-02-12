@@ -4,6 +4,7 @@ hydrolib.hydrograph - Hydrograph analysis and plotting
 
 from __future__ import annotations
 
+import math
 from functools import lru_cache
 from typing import ClassVar, List, Tuple
 
@@ -12,9 +13,12 @@ import numpy as np
 import pandas as pd
 from matplotlib.dates import DateFormatter
 
+plt_color: str = "steelblue"
 
 class Hydrograph:
     """Class for hydrograph analysis and plotting."""
+
+    FONT_SIZE: ClassVar[int] = 12
 
     MONTH_STARTS: ClassVar[List[int]] = [1, 32, 62, 93, 123, 154, 184, 215, 246, 274, 305, 335]
     MONTH_LABELS: ClassVar[List[str]] = [
@@ -54,25 +58,35 @@ class Hydrograph:
         site_no: str = None,
         save_path: str = None,
         figsize: Tuple[int, int] = (12, 5),
-        color: str = "steelblue",
+        color: str = plt_color,
     ) -> plt.Figure:
         """Plot daily flow time series."""
         fig, ax = plt.subplots(figsize=figsize)
 
         ax.plot(daily_data.index, daily_data["flow_cfs"], color=color, linewidth=0.5, alpha=0.8)
         ax.set_yscale("log")
-        ax.set_ylabel("Discharge (cfs)", fontsize=11)
-        ax.set_xlabel("Date", fontsize=11)
+        ax.set_ylabel("Discharge (cfs)", fontsize=cls.FONT_SIZE)
+        ax.set_xlabel("Date", fontsize=cls.FONT_SIZE)
 
         title = "Mean Daily Streamflow"
         if site_name and site_no:
             title = f"Mean Daily Streamflow\nUSGS {site_no} - {site_name}"
         elif site_no:
             title = f"Mean Daily Streamflow - USGS {site_no}"
-        ax.set_title(title, fontsize=12, fontweight="bold")
+        ax.set_title(title, fontsize=cls.FONT_SIZE, fontweight="bold")
 
         ax.grid(True, which="both", alpha=0.3)
         ax.xaxis.set_major_formatter(DateFormatter("%Y"))
+
+        # Set y-ticks to powers of 10
+        min_flow = daily_data["flow_cfs"].min()
+        max_flow = daily_data["flow_cfs"].max()
+        if min_flow > 0:
+            min_exp = math.floor(math.log10(min_flow))
+            max_exp = math.ceil(math.log10(max_flow))
+            ticks = [10**i for i in range(min_exp, max_exp + 1)]
+            ax.set_yticks(ticks)
+            ax.set_yticklabels([f"{int(tick):,}" for tick in ticks])
 
         start_yr = daily_data.index.min().year
         end_yr = daily_data.index.max().year
@@ -80,7 +94,7 @@ class Hydrograph:
             f"Period of Record: {start_yr}-{end_yr}",
             xy=(0.02, 0.98),
             xycoords="axes fraction",
-            fontsize=9,
+            fontsize=cls.FONT_SIZE,
             ha="left",
             va="top",
             bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
@@ -123,7 +137,7 @@ class Hydrograph:
                 stats_df[f"p{percentiles[0]}"],
                 stats_df[f"p{percentiles[-1]}"],
                 alpha=0.3,
-                color="blue",
+                color=plt_color,
                 label=f"{percentiles[0]}-{percentiles[-1]}th percentile",
             )
             ax.fill_between(
@@ -131,29 +145,56 @@ class Hydrograph:
                 stats_df[f"p{percentiles[1]}"],
                 stats_df[f"p{percentiles[-2]}"],
                 alpha=0.4,
-                color="blue",
+                color=plt_color,
                 label=f"{percentiles[1]}-{percentiles[-2]}th percentile",
             )
 
-        ax.plot(stats_df.index, stats_df["p50"], "b-", linewidth=2, label="Median")
-        ax.plot(stats_df.index, stats_df["mean"], "k--", linewidth=1.5, label="Mean")
+        ax.plot(stats_df.index, stats_df["p50"], "k-", linewidth=1, label="Median")
+        ax.plot(
+            stats_df.index,
+            stats_df["min"],
+            ":",
+            linewidth=1,
+            color=plt_color,
+            alpha=0.4,
+            label="Min",
+        )
+        ax.plot(
+            stats_df.index,
+            stats_df["max"],
+            ":",
+            linewidth=1,
+            color=plt_color,
+            alpha=0.4,
+            label="Max",
+        )
 
         ax.set_yscale("log")
-        ax.set_ylabel("Discharge (cfs)", fontsize=11)
-        ax.set_xlabel("Day of Water Year", fontsize=11)
+        ax.set_ylabel("Discharge (cfs)", fontsize=cls.FONT_SIZE)
+        ax.set_xlabel("Day of Water Year", fontsize=cls.FONT_SIZE)
 
         ax.set_xticks(cls.MONTH_STARTS)
         ax.set_xticklabels(cls.MONTH_LABELS)
         ax.set_xlim(1, 366)
+
+        # Set y-ticks to powers of 10
+        min_flow = daily_data["flow_cfs"].min()
+        max_flow = daily_data["flow_cfs"].max()
+        if min_flow > 0:
+            min_exp = math.floor(math.log10(min_flow))
+            max_exp = math.ceil(math.log10(max_flow))
+            ticks = [10**i for i in range(min_exp, max_exp + 1)]
+            ax.set_yticks(ticks)
+            ax.set_yticklabels([f"{int(tick):,}" for tick in ticks])
 
         title = "Summary Hydrograph"
         if site_name and site_no:
             title = f"Summary Hydrograph\nUSGS {site_no} - {site_name}"
         elif site_no:
             title = f"Summary Hydrograph - USGS {site_no}"
-        ax.set_title(title, fontsize=12, fontweight="bold")
+        ax.set_title(title, fontsize=cls.FONT_SIZE, fontweight="bold")
 
-        ax.legend(loc="upper right", fontsize=9)
+        ax.legend(loc="upper right", fontsize=cls.FONT_SIZE)
         ax.grid(True, which="both", alpha=0.3)
 
         start_yr = daily_data.index.min().year
@@ -163,7 +204,7 @@ class Hydrograph:
             f"Period of Record: {start_yr}-{end_yr} ({n_years} years)",
             xy=(0.02, 0.02),
             xycoords="axes fraction",
-            fontsize=9,
+            fontsize=cls.FONT_SIZE,
             ha="left",
             va="bottom",
             bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
@@ -184,98 +225,71 @@ class Hydrograph:
         site_no: str = None,
         save_path: str = None,
         table_path: str = None,
-        figsize: Tuple[int, int] = (8, 6),
+        figsize: Tuple[int, int] = (10, 6),
     ) -> Tuple[plt.Figure, pd.DataFrame]:
-        """
-        Plot flow duration curve.
-
-        Parameters
-        ----------
-        daily_data : pd.DataFrame
-            Daily flow data with 'flow_cfs' column
-        site_name : str, optional
-            Site name for title
-        site_no : str, optional
-            Site number for title
-        save_path : str, optional
-            Path to save figure
-        table_path : str, optional
-            Path to save statistics table as CSV
-        figsize : tuple
-            Figure size
-
-        Returns
-        -------
-        tuple
-            (figure, stats_dataframe)
-        """
-        # Get flow values and sort descending
+        """Plot flow duration curve and return flow duration statistics table."""
         flows = daily_data["flow_cfs"].dropna().values
-        flows_sorted = np.sort(flows)[::-1]
+        flows_sorted = np.sort(flows)[::-1]  # descending
         n = len(flows_sorted)
+        exceedance_pct = np.arange(1, n + 1) / n * 100
 
-        # Calculate exceedance probability
-        ranks = np.arange(1, n + 1)
-        exceedance_prob = (ranks / (n + 1)) * 100
-
-        # Create figure
         fig, ax = plt.subplots(figsize=figsize)
 
-        ax.plot(exceedance_prob, flows_sorted, "b-", linewidth=1.5)
+        ax.plot(exceedance_pct, flows_sorted, color=plt_color, linewidth=1.5)
         ax.set_yscale("log")
-        ax.set_xlabel("Percent of Time Flow is Equaled or Exceeded", fontsize=11)
-        ax.set_ylabel("Discharge (cfs)", fontsize=11)
+        ax.set_xlabel("Percent of Time Exceeded (%)", fontsize=cls.FONT_SIZE)
+        ax.set_ylabel("Discharge (cfs)", fontsize=cls.FONT_SIZE)
 
-        # Title
         title = "Flow Duration Curve"
         if site_name and site_no:
             title = f"Flow Duration Curve\nUSGS {site_no} - {site_name}"
         elif site_no:
             title = f"Flow Duration Curve - USGS {site_no}"
-        ax.set_title(title, fontsize=12, fontweight="bold")
+        ax.set_title(title, fontsize=cls.FONT_SIZE, fontweight="bold")
 
-        ax.set_xlim(0, 100)
         ax.grid(True, which="both", alpha=0.3)
 
-        # Calculate key statistics
-        percentiles = [1, 5, 10, 25, 50, 75, 90, 95, 99]
-        stats_data = []
-        for p in percentiles:
-            flow_val = np.percentile(flows, 100 - p)
-            stats_data.append({
-                "Exceedance %": p,
-                "Flow (cfs)": flow_val,
-            })
-            # Add marker on plot
-            ax.plot(p, flow_val, "ro", markersize=4)
+        # Set y-ticks to powers of 10
+        min_flow = flows.min()
+        max_flow = flows.max()
+        if min_flow > 0:
+            min_exp = math.floor(math.log10(min_flow))
+            max_exp = math.ceil(math.log10(max_flow))
+            ticks = [10**i for i in range(min_exp, max_exp + 1)]
+            ax.set_yticks(ticks)
+            ax.set_yticklabels([f"{int(tick):,}" for tick in ticks])
 
-        stats_df = pd.DataFrame(stats_data)
+        # Set x-ticks
+        ax.set_xscale("linear")
+        ax.set_xlim(0, 100)
+        ax.set_xticks([0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100])
 
-        # Add statistics annotation
-        q50 = np.percentile(flows, 50)
-        q10 = np.percentile(flows, 90)  # 10% exceedance
-        q90 = np.percentile(flows, 10)  # 90% exceedance
-
-        stats_text = (
-            f"Q50 (median): {q50:,.0f} cfs\n"
-            f"Q10 (high flow): {q10:,.0f} cfs\n"
-            f"Q90 (low flow): {q90:,.0f} cfs"
-        )
+        start_yr = daily_data.index.min().year
+        end_yr = daily_data.index.max().year
+        n_years = len(daily_data.index.year.unique())
         ax.annotate(
-            stats_text,
-            xy=(0.98, 0.98),
+            f"Period of Record: {start_yr}-{end_yr} ({n_years} years)",
+            xy=(0.02, 0.98),
             xycoords="axes fraction",
-            fontsize=9,
-            ha="right",
+            fontsize=cls.FONT_SIZE,
+            ha="left",
             va="top",
-            family="monospace",
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.9),
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
         )
 
         plt.tight_layout()
 
         if save_path:
             fig.savefig(save_path, dpi=300, bbox_inches="tight")
+
+        # Compute flow duration statistics
+        percentiles_exceeded = [1, 5, 10, 20, 50, 80, 90, 95, 99]
+        flow_stats = []
+        for pct in percentiles_exceeded:
+            flow_value = np.percentile(flows, 100 - pct)
+            flow_stats.append({"Percent Exceeded": f"{pct}%", "Flow (cfs)": flow_value})
+
+        stats_df = pd.DataFrame(flow_stats)
 
         if table_path:
             stats_df.to_csv(table_path, index=False)
