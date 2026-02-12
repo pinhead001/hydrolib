@@ -113,7 +113,7 @@ class Hydrograph:
             fontsize=cls.ANNOT_FONT_SIZE,
             ha="left",
             va="top",
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8, pad=0.3),
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", edgecolor="lightgray", alpha=1.0),
         )
 
         plt.tight_layout()
@@ -215,7 +215,6 @@ class Hydrograph:
         ax.legend(
             loc="upper right",
             fontsize=cls.ANNOT_FONT_SIZE,  # Smaller legend font
-            bbox_to_anchor=(1 - cls.BOX_PADDING, 1 - cls.BOX_PADDING),
         )
         ax.grid(True, which="both", alpha=0.3)
 
@@ -239,7 +238,7 @@ class Hydrograph:
             fontsize=cls.ANNOT_FONT_SIZE,
             ha="left",
             va="top",
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8, pad=0.3),
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", edgecolor="lightgray", alpha=1.0),
         )
 
         plt.tight_layout()
@@ -343,7 +342,7 @@ class Hydrograph:
             fontsize=cls.ANNOT_FONT_SIZE,
             ha="left",
             va="top",
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8, pad=0.3),
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", edgecolor="lightgray", alpha=1.0),
         )
 
         plt.tight_layout()
