@@ -197,6 +197,7 @@ if download_data and gage_list:
 
     status_text.text("Download complete!")
     plt.close("all")
+    st.rerun()  # Refresh page to display plots with new data
 
 
 # Show plot date range controls only if data is loaded
