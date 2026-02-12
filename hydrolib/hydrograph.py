@@ -19,6 +19,7 @@ class Hydrograph:
     """Class for hydrograph analysis and plotting."""
 
     FONT_SIZE: ClassVar[int] = 12
+    ANNOT_FONT_SIZE: ClassVar[int] = 9  # Smaller font for annotations
 
     # Consistent spacing for text boxes from axes edges (axes fraction coordinates)
     BOX_PADDING: ClassVar[float] = 0.03
@@ -62,6 +63,8 @@ class Hydrograph:
         save_path: str = None,
         figsize: Tuple[int, int] = (12, 5),
         color: str = plt_color,
+        por_start: str = None,
+        por_end: str = None,
     ) -> plt.Figure:
         """Plot daily flow time series."""
         fig, ax = plt.subplots(figsize=figsize)
@@ -91,16 +94,24 @@ class Hydrograph:
             ax.set_yticks(ticks)
             ax.set_yticklabels([f"{int(tick):,}" for tick in ticks])
 
-        start_yr = daily_data.index.min().year
-        end_yr = daily_data.index.max().year
+        # Format dates for annotation
+        plot_start = daily_data.index.min().strftime("%-m/%-d/%Y")
+        plot_end = daily_data.index.max().strftime("%-m/%-d/%Y")
+
+        # Build annotation text
+        if por_start and por_end:
+            annot_text = f"POR: {por_start} - {por_end}\nPlot: {plot_start} - {plot_end}"
+        else:
+            annot_text = f"POR: {plot_start} - {plot_end}"
+
         ax.annotate(
-            f"Period of Record: {start_yr}-{end_yr}",
+            annot_text,
             xy=(cls.BOX_PADDING, 1 - cls.BOX_PADDING),
             xycoords="axes fraction",
-            fontsize=cls.FONT_SIZE,
+            fontsize=cls.ANNOT_FONT_SIZE,
             ha="left",
             va="top",
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8, pad=0.3),
         )
 
         plt.tight_layout()
@@ -119,6 +130,8 @@ class Hydrograph:
         save_path: str = None,
         figsize: Tuple[int, int] = (10, 6),
         percentiles: List[int] = None,
+        por_start: str = None,
+        por_end: str = None,
     ) -> plt.Figure:
         """Plot summary hydrograph with day of water year on x-axis."""
         if percentiles is None:
@@ -204,17 +217,25 @@ class Hydrograph:
         )
         ax.grid(True, which="both", alpha=0.3)
 
-        start_yr = daily_data.index.min().year
-        end_yr = daily_data.index.max().year
+        # Format dates for annotation
+        plot_start = daily_data.index.min().strftime("%-m/%-d/%Y")
+        plot_end = daily_data.index.max().strftime("%-m/%-d/%Y")
         n_years = len(df.index.year.unique())
+
+        # Build annotation text
+        if por_start and por_end:
+            annot_text = f"POR: {por_start} - {por_end}\nPlot: {plot_start} - {plot_end}\n({n_years} years plotted)"
+        else:
+            annot_text = f"POR: {plot_start} - {plot_end}\n({n_years} years)"
+
         ax.annotate(
-            f"Period of Record: {start_yr}-{end_yr} ({n_years} years)",
+            annot_text,
             xy=(cls.BOX_PADDING, cls.BOX_PADDING),
             xycoords="axes fraction",
-            fontsize=cls.FONT_SIZE,
+            fontsize=cls.ANNOT_FONT_SIZE,
             ha="left",
             va="bottom",
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8, pad=0.3),
         )
 
         plt.tight_layout()
@@ -233,6 +254,8 @@ class Hydrograph:
         save_path: str = None,
         table_path: str = None,
         figsize: Tuple[int, int] = (10, 6),
+        por_start: str = None,
+        por_end: str = None,
     ) -> Tuple[plt.Figure, pd.DataFrame]:
         """Plot flow duration curve and return flow duration statistics table."""
         flows = daily_data["flow_cfs"].dropna().values
@@ -271,17 +294,25 @@ class Hydrograph:
         ax.set_xlim(0, 100)
         ax.set_xticks([0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100])
 
-        start_yr = daily_data.index.min().year
-        end_yr = daily_data.index.max().year
+        # Format dates for annotation
+        plot_start = daily_data.index.min().strftime("%-m/%-d/%Y")
+        plot_end = daily_data.index.max().strftime("%-m/%-d/%Y")
         n_years = len(daily_data.index.year.unique())
+
+        # Build annotation text
+        if por_start and por_end:
+            annot_text = f"POR: {por_start} - {por_end}\nPlot: {plot_start} - {plot_end}\n({n_years} years plotted)"
+        else:
+            annot_text = f"POR: {plot_start} - {plot_end}\n({n_years} years)"
+
         ax.annotate(
-            f"Period of Record: {start_yr}-{end_yr} ({n_years} years)",
+            annot_text,
             xy=(cls.BOX_PADDING, 1 - cls.BOX_PADDING),
             xycoords="axes fraction",
-            fontsize=cls.FONT_SIZE,
+            fontsize=cls.ANNOT_FONT_SIZE,
             ha="left",
             va="top",
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8, pad=0.3),
         )
 
         plt.tight_layout()

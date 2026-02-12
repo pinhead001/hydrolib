@@ -283,6 +283,19 @@ else:
 
                 site_figs = {}
 
+                # Check if requested date range differs from actual data
+                actual_start = daily_data.index.min()
+                actual_end = daily_data.index.max()
+                requested_start = pd.Timestamp(start_date)
+                requested_end = pd.Timestamp(end_date)
+
+                # Pass POR dates if user requested a different range than what's available
+                por_start = None
+                por_end = None
+                if actual_start > requested_start or actual_end < requested_end:
+                    por_start = requested_start.strftime("%-m/%-d/%Y")
+                    por_end = requested_end.strftime("%-m/%-d/%Y")
+
                 # Daily time series
                 if show_timeseries:
                     fig1 = Hydrograph.plot_daily_timeseries(
@@ -290,6 +303,8 @@ else:
                         site_name=gage.site_name,
                         site_no=gage.site_no,
                         figsize=(10, 4),
+                        por_start=por_start,
+                        por_end=por_end,
                     )
                     col_idx = plots_to_show.index("timeseries")
                     with cols[col_idx]:
@@ -312,6 +327,8 @@ else:
                         site_no=gage.site_no,
                         figsize=(10, 4),
                         percentiles=[10, 25, 50, 75, 90],
+                        por_start=por_start,
+                        por_end=por_end,
                     )
                     col_idx = plots_to_show.index("summary")
                     with cols[col_idx]:
@@ -336,6 +353,8 @@ else:
                         site_name=gage.site_name,
                         site_no=gage.site_no,
                         figsize=(10, 4),
+                        por_start=por_start,
+                        por_end=por_end,
                     )
                     col_idx = plots_to_show.index("fdc")
                     with cols[col_idx]:
