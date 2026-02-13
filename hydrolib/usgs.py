@@ -222,7 +222,11 @@ class USGSgage:
                     except (ValueError, TypeError):
                         pass
 
-        # Always fetch from API to get POR dates (and fill in any missing info)
+        # Fetch from USGS Site Service API for POR dates and any missing info
+        self._fetch_from_usgs_site_service()
+
+    def _fetch_from_usgs_site_service(self) -> None:
+        """Fetch site info from USGS Site Service API."""
         params = {
             "format": "rdb",
             "sites": self._site_no,
@@ -241,7 +245,7 @@ class USGSgage:
             if len(data_lines) >= 2:
                 df = pd.read_csv(StringIO("\n".join(data_lines)), sep="\t", skiprows=[1])
 
-                # Only use API values if not already set from local file
+                # Use API values if not already set from local file
                 if self._site_name is None and "station_nm" in df.columns and len(df) > 0:
                     self._site_name = df["station_nm"].iloc[0]
 
@@ -260,7 +264,7 @@ class USGSgage:
                         if "end_date" in df.columns:
                             self._daily_por_end = str(dv_rows["end_date"].iloc[0])
         except Exception:
-            pass  # Silently fail, will use fallback from daily/peak data
+            pass  # API failed, continue with any data we have
 
     def download_daily_flow(self, start_date: str = None, end_date: str = None) -> pd.DataFrame:
         """Download mean daily streamflow data from USGS."""
