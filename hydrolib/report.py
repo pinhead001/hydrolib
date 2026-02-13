@@ -16,11 +16,14 @@ from .core import AnalysisMethod, FrequencyResults
 from .hydrograph import Hydrograph
 from .usgs import USGSgage
 
+# Alias for type hints
+USGSGage = USGSgage
+
 
 class HydroReport:
     """Generate technical report for hydrologic analysis."""
 
-    def __init__(self, gage: USGSgage, analysis: Union[Bulletin17C, FloodFrequencyAnalysis]):
+    def __init__(self, gage: USGSGage, analysis: Union[Bulletin17C, FloodFrequencyAnalysis]):
         self._gage = gage
 
         if isinstance(analysis, Bulletin17C):

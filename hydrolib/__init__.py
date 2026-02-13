@@ -7,13 +7,10 @@ Includes:
 - Bulletin 17C flood frequency analysis:
   - Method of Moments (MOM)
   - Expected Moments Algorithm (EMA) with full PeakFQ parity
-  - B17CEngine for simplified PeakFQ-style analysis
-- Multi-site batch processing
 - Historical flood information handling
 - Technical report generation
 """
 
-from .batch import analyze_sites, batch_summary_table, run_multi_site
 from .bulletin17c import (
     Bulletin17C,
     ExpectedMomentsAlgorithm,
@@ -25,25 +22,17 @@ from .core import (
     EMAParameters,
     FlowInterval,
     FrequencyResults,
-    PeakRecord,
     SkewMethod,
-    compute_ci_lp3,
     grubbs_beck_critical_value,
     kfactor,
     kfactor_array,
-    lp3_frequency_factor_peakfq,
-    lp3_quantile_peakfq,
 )
-from .engine import B17CEngine, STANDARD_RETURN_PERIODS
 from .hydrograph import Hydrograph
-from .plots import (
-    apply_b17c_style,
-    plot_frequency_curve,
-    plot_multi_site_comparison,
-    plotting_positions,
-)
 from .report import HydroReport
-from .usgs import USGSgage, fetch_nwis_batch, fetch_nwis_peaks
+from .usgs import GageAttributes, USGSgage, fetch_nwis_batch, fetch_nwis_peaks
+
+# Alias for backwards compatibility
+USGSGage = USGSgage
 
 
 def analyze_gage(
@@ -133,43 +122,28 @@ __version__ = "0.0.3"
 __author__ = "HydroLib"
 
 __all__ = [
-    # Core data structures
+    # Core
     "AnalysisMethod",
     "SkewMethod",
     "FlowInterval",
     "EMAParameters",
     "FrequencyResults",
-    "PeakRecord",
-    # Core functions
     "kfactor",
     "kfactor_array",
     "grubbs_beck_critical_value",
-    "lp3_frequency_factor_peakfq",
-    "lp3_quantile_peakfq",
-    "compute_ci_lp3",
     # USGS data retrieval
     "USGSgage",
+    "USGSGage",  # Alias for backwards compatibility
+    "GageAttributes",
     "fetch_nwis_peaks",
     "fetch_nwis_batch",
     # Hydrograph
     "Hydrograph",
-    # Bulletin 17C analysis
+    # Bulletin 17C
     "Bulletin17C",
     "MethodOfMoments",
     "ExpectedMomentsAlgorithm",
     "FloodFrequencyAnalysis",
-    # B17C Engine (PeakFQ-style)
-    "B17CEngine",
-    "STANDARD_RETURN_PERIODS",
-    # Batch processing
-    "run_multi_site",
-    "analyze_sites",
-    "batch_summary_table",
-    # Plotting
-    "apply_b17c_style",
-    "plot_frequency_curve",
-    "plot_multi_site_comparison",
-    "plotting_positions",
     # Report
     "HydroReport",
     # Convenience

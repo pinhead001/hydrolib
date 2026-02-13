@@ -35,7 +35,7 @@ class FloodFrequencyAnalysis(ABC):
     """Abstract base class for flood frequency analysis methods."""
 
     STANDARD_AEP: ClassVar[np.ndarray] = np.array(
-        [0.995, 0.99, 0.95, 0.90, 0.80, 0.50, 0.20, 0.10, 0.04, 0.02, 0.01, 0.005, 0.002]
+        [0.995, 0.99, 0.95, 0.90, 0.80, 0.67, 0.50, 0.20, 0.10, 0.04, 0.02, 0.01, 0.005, 0.002]
     )
 
     def __init__(
