@@ -123,6 +123,10 @@ class GageAttributes:
     @classmethod
     def status(cls) -> Dict:
         """Return status info about the loaded data file (for debugging)."""
+        # Ensure singleton is initialized
+        if cls._instance is None:
+            cls()
+
         data_file = cls._find_data_file()
         return {
             "data_file": str(data_file) if data_file else None,
