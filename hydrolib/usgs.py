@@ -230,19 +230,52 @@ class USGSgage:
         self._fetch_from_usgs_site_service()
 
     def _fetch_from_usgs_site_service(self) -> None:
-        """Fetch site info from USGS Site Service API."""
+        """Fetch site info from USGS Site Service API.
+
+        Makes two separate API calls because siteOutput=expanded and
+        seriesCatalogOutput=true cannot be combined in a single request.
+        """
         self._last_api_error: Optional[str] = None
 
-        params = {
+        # Call 1: Get site metadata (name, drainage area) with siteOutput=expanded
+        if self._site_name is None or self._drainage_area is None:
+            params_site = {
+                "format": "rdb",
+                "sites": self._site_no,
+                "siteOutput": "expanded",
+            }
+
+            try:
+                response = requests.get(self.BASE_URL_SITE, params=params_site, timeout=30)
+                response.raise_for_status()
+
+                lines = response.text.split("\n")
+                data_lines = [l for l in lines if not l.startswith("#") and l.strip()]
+
+                if len(data_lines) >= 2:
+                    df = pd.read_csv(StringIO("\n".join(data_lines)), sep="\t", skiprows=[1])
+
+                    if self._site_name is None and "station_nm" in df.columns and len(df) > 0:
+                        self._site_name = df["station_nm"].iloc[0]
+
+                    if self._drainage_area is None and "drain_area_va" in df.columns and len(df) > 0:
+                        try:
+                            self._drainage_area = float(df["drain_area_va"].iloc[0])
+                        except (ValueError, TypeError):
+                            pass
+            except Exception as e:
+                self._last_api_error = str(e)
+
+        # Call 2: Get period of record with seriesCatalogOutput=true
+        params_por = {
             "format": "rdb",
             "sites": self._site_no,
-            "siteOutput": "expanded",
             "seriesCatalogOutput": "true",
             "parameterCd": "00060",  # Discharge
         }
 
         try:
-            response = requests.get(self.BASE_URL_SITE, params=params, timeout=30)
+            response = requests.get(self.BASE_URL_SITE, params=params_por, timeout=30)
             response.raise_for_status()
 
             lines = response.text.split("\n")
@@ -250,16 +283,6 @@ class USGSgage:
 
             if len(data_lines) >= 2:
                 df = pd.read_csv(StringIO("\n".join(data_lines)), sep="\t", skiprows=[1])
-
-                # Use API values if not already set from local file
-                if self._site_name is None and "station_nm" in df.columns and len(df) > 0:
-                    self._site_name = df["station_nm"].iloc[0]
-
-                if self._drainage_area is None and "drain_area_va" in df.columns and len(df) > 0:
-                    try:
-                        self._drainage_area = float(df["drain_area_va"].iloc[0])
-                    except (ValueError, TypeError):
-                        pass
 
                 # Get daily value POR (data_type_cd == 'dv' for daily values)
                 if "data_type_cd" in df.columns:
@@ -270,8 +293,10 @@ class USGSgage:
                         if "end_date" in df.columns:
                             self._daily_por_end = str(dv_rows["end_date"].iloc[0])
         except Exception as e:
-            self._last_api_error = str(e)
-            # API failed, continue with any data we have
+            if self._last_api_error:
+                self._last_api_error += f"; {str(e)}"
+            else:
+                self._last_api_error = str(e)
 
     def download_daily_flow(self, start_date: str = None, end_date: str = None) -> pd.DataFrame:
         """Download mean daily streamflow data from USGS."""
