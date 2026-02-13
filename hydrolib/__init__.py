@@ -29,7 +29,10 @@ from .core import (
 )
 from .hydrograph import Hydrograph
 from .report import HydroReport
-from .usgs import USGSGage
+from .usgs import GageAttributes, USGSgage, fetch_nwis_batch, fetch_nwis_peaks
+
+# Alias for backwards compatibility
+USGSGage = USGSgage
 
 
 def analyze_gage(
@@ -63,7 +66,7 @@ def analyze_gage(
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"Downloading data for USGS {site_no}...")
-    gage = USGSGage(site_no)
+    gage = USGSgage(site_no)
 
     try:
         gage.download_daily_flow()
@@ -115,7 +118,7 @@ def analyze_gage(
     }
 
 
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 __author__ = "HydroLib"
 
 __all__ = [
@@ -128,8 +131,12 @@ __all__ = [
     "kfactor",
     "kfactor_array",
     "grubbs_beck_critical_value",
-    # USGS
-    "USGSGage",
+    # USGS data retrieval
+    "USGSgage",
+    "USGSGage",  # Alias for backwards compatibility
+    "GageAttributes",
+    "fetch_nwis_peaks",
+    "fetch_nwis_batch",
     # Hydrograph
     "Hydrograph",
     # Bulletin 17C
