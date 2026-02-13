@@ -27,13 +27,37 @@ class GageAttributes:
 
     _instance: ClassVar[Optional["GageAttributes"]] = None
     _data: ClassVar[Optional[pd.DataFrame]] = None
-    DEFAULT_PATH: ClassVar[Path] = Path(__file__).parent.parent / "data" / "gage_attributes.csv"
+
+    @classmethod
+    def _find_data_file(cls) -> Optional[Path]:
+        """Find the gage_attributes.csv file in various locations."""
+        # Try multiple possible locations
+        candidates = [
+            # Relative to this module (for editable installs)
+            Path(__file__).parent.parent / "data" / "gage_attributes.csv",
+            # Relative to current working directory
+            Path.cwd() / "data" / "gage_attributes.csv",
+            # In hydrolib package data
+            Path(__file__).parent / "data" / "gage_attributes.csv",
+        ]
+
+        for path in candidates:
+            if path.exists():
+                return path
+        return None
 
     def __new__(cls, path: Optional[Path] = None):
         """Singleton pattern - only load the file once."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._load_data(path or cls.DEFAULT_PATH)
+            if path:
+                cls._load_data(path)
+            else:
+                data_file = cls._find_data_file()
+                if data_file:
+                    cls._load_data(data_file)
+                else:
+                    cls._data = pd.DataFrame()
         return cls._instance
 
     @classmethod
@@ -53,7 +77,14 @@ class GageAttributes:
     @classmethod
     def reload(cls, path: Optional[Path] = None) -> None:
         """Reload attributes from file (useful after file changes)."""
-        cls._load_data(path or cls.DEFAULT_PATH)
+        if path:
+            cls._load_data(path)
+        else:
+            data_file = cls._find_data_file()
+            if data_file:
+                cls._load_data(data_file)
+            else:
+                cls._data = pd.DataFrame()
 
     @classmethod
     def get_attributes(cls, site_no: str) -> Optional[Dict]:
@@ -88,6 +119,17 @@ class GageAttributes:
         if attrs and "site_name" in attrs:
             return str(attrs["site_name"])
         return None
+
+    @classmethod
+    def status(cls) -> Dict:
+        """Return status info about the loaded data file (for debugging)."""
+        data_file = cls._find_data_file()
+        return {
+            "data_file": str(data_file) if data_file else None,
+            "file_exists": data_file.exists() if data_file else False,
+            "num_gages": len(cls._data) if cls._data is not None and not cls._data.empty else 0,
+            "gages": list(cls._data.index) if cls._data is not None and not cls._data.empty else [],
+        }
 
 
 class USGSgage:
