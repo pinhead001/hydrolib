@@ -231,6 +231,8 @@ class USGSgage:
 
     def _fetch_from_usgs_site_service(self) -> None:
         """Fetch site info from USGS Site Service API."""
+        self._last_api_error: Optional[str] = None
+
         params = {
             "format": "rdb",
             "sites": self._site_no,
@@ -267,8 +269,9 @@ class USGSgage:
                             self._daily_por_start = str(dv_rows["begin_date"].iloc[0])
                         if "end_date" in df.columns:
                             self._daily_por_end = str(dv_rows["end_date"].iloc[0])
-        except Exception:
-            pass  # API failed, continue with any data we have
+        except Exception as e:
+            self._last_api_error = str(e)
+            # API failed, continue with any data we have
 
     def download_daily_flow(self, start_date: str = None, end_date: str = None) -> pd.DataFrame:
         """Download mean daily streamflow data from USGS."""
