@@ -14,7 +14,10 @@ import pandas as pd
 from .bulletin17c import Bulletin17C, FloodFrequencyAnalysis
 from .core import AnalysisMethod, FrequencyResults
 from .hydrograph import Hydrograph
-from .usgs import USGSGage
+from .usgs import USGSgage
+
+# Alias for type hints
+USGSGage = USGSgage
 
 
 class HydroReport:
