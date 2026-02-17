@@ -17,7 +17,7 @@ from typing import Any
 
 from hydrolib.peakfqsa.config import PeakfqSAConfig, find_peakfqsa
 from hydrolib.peakfqsa.io_converters import DataFile, SpecificationFile
-from hydrolib.peakfqsa.parsers import PeakfqSAResult
+from hydrolib.peakfqsa.parsers import PeakfqSAResult, parse_peakfqsa_output
 
 logger = logging.getLogger(__name__)
 
@@ -115,8 +115,6 @@ class PeakfqSAWrapper:
 
         Raises
         ------
-        PeakfqSANotFoundError
-            If PeakfqSA executable is not available.
         PeakfqSAExecutionError
             If PeakfqSA exits with non-zero code.
         PeakfqSATimeoutError
@@ -124,8 +122,43 @@ class PeakfqSAWrapper:
         PeakfqSAParseError
             If output cannot be parsed.
         """
-        # TODO: Implement full run workflow
-        raise NotImplementedError("PeakfqSAWrapper.run() not yet implemented")
+        if self._executable is None:
+            self._executable = find_peakfqsa()
+
+        # Create temp directory (or use configured one)
+        tmp_dir_ctx = None
+        if self.config.temp_dir:
+            tmp_dir = self.config.temp_dir
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            tmp_dir_ctx = tempfile.TemporaryDirectory(prefix="peakfqsa_")
+            tmp_dir = Path(tmp_dir_ctx.name)
+
+        try:
+            # Write input files
+            spec_path, data_path = self._write_input_files(
+                tmp_dir=tmp_dir,
+                peaks=peaks,
+                historical=historical,
+                thresholds=thresholds,
+                begyear=begyear,
+                endyear=endyear,
+                regional_skew=regional_skew,
+                regional_skew_sd=regional_skew_sd,
+                station_name=station_name,
+                **kwargs,
+            )
+
+            # Execute PeakfqSA
+            output_text = self._execute(spec_path, tmp_dir)
+
+            # Parse output
+            result = self._parse_output_text(output_text)
+            return result
+
+        finally:
+            if tmp_dir_ctx and not self.config.keep_temp_files:
+                tmp_dir_ctx.cleanup()
 
     def _write_input_files(
         self,
@@ -147,30 +180,121 @@ class PeakfqSAWrapper:
         tuple[Path, Path]
             Paths to the specification file and data file.
         """
-        # TODO: Implement input file generation
-        raise NotImplementedError
+        data_filename = "peaks.dat"
+        data_path = tmp_dir / data_filename
+
+        # Build data file
+        data_file = DataFile.from_analysis_params(
+            peaks=peaks,
+            historical=historical,
+            station_name=station_name,
+        )
+        data_file.write(data_path)
+
+        # Build specification file
+        spec = SpecificationFile.from_analysis_params(
+            peaks=peaks,
+            historical=historical,
+            thresholds=thresholds,
+            begyear=begyear,
+            endyear=endyear,
+            regional_skew=regional_skew,
+            regional_skew_sd=regional_skew_sd,
+            station_name=station_name,
+            data_filename=data_filename,
+            **kwargs,
+        )
+        spec_path = tmp_dir / "analysis.psf"
+        spec.write(spec_path)
+
+        logger.info("Wrote input files to %s", tmp_dir)
+        return spec_path, data_path
 
     def _execute(self, spec_file: Path, tmp_dir: Path) -> str:
         """Execute PeakfqSA and return raw output text.
+
+        Parameters
+        ----------
+        spec_file : Path
+            Path to the .psf specification file.
+        tmp_dir : Path
+            Working directory for execution.
 
         Returns
         -------
         str
             Raw content of the output file.
-        """
-        # TODO: Implement subprocess execution
-        raise NotImplementedError
 
-    def _parse_output(self, output_file: Path) -> PeakfqSAResult:
-        """Parse PeakfqSA .out file into a result object.
+        Raises
+        ------
+        PeakfqSAExecutionError
+            If the process exits with non-zero return code.
+        PeakfqSATimeoutError
+            If execution exceeds timeout.
+        """
+        cmd = [str(self._executable), str(spec_file)]
+        logger.info("Running PeakfqSA: %s", " ".join(cmd))
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=str(tmp_dir),
+                timeout=self.config.timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as e:
+            raise PeakfqSATimeoutError(
+                f"PeakfqSA timed out after {self.config.timeout_seconds} seconds"
+            ) from e
+
+        if result.returncode != 0:
+            raise PeakfqSAExecutionError(
+                returncode=result.returncode,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+
+        # Look for output file (PeakfqSA typically writes .out with same stem)
+        out_file = spec_file.with_suffix(".out")
+        if not out_file.exists():
+            # Try common alternatives
+            for candidate in tmp_dir.glob("*.out"):
+                out_file = candidate
+                break
+            else:
+                # Fall back to stdout if no .out file found
+                if result.stdout.strip():
+                    logger.warning("No .out file found; using stdout")
+                    return result.stdout
+                raise PeakfqSAParseError(f"No output file found in {tmp_dir} and stdout is empty")
+
+        output_text = out_file.read_text()
+        logger.info("Read output file: %s (%d chars)", out_file, len(output_text))
+        return output_text
+
+    def _parse_output_text(self, text: str) -> PeakfqSAResult:
+        """Parse PeakfqSA output text into a result object.
+
+        Parameters
+        ----------
+        text : str
+            Raw output text from PeakfqSA.
 
         Returns
         -------
         PeakfqSAResult
             Parsed results.
+
+        Raises
+        ------
+        PeakfqSAParseError
+            If the output cannot be parsed.
         """
-        # TODO: Implement output parsing delegation
-        raise NotImplementedError
+        try:
+            return parse_peakfqsa_output(text)
+        except Exception as e:
+            raise PeakfqSAParseError(f"Failed to parse PeakfqSA output: {e}") from e
 
     def is_available(self) -> bool:
         """Check whether PeakfqSA executable is available.
