@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .core import PeakRecord
-from .engine import B17CEngine, STANDARD_RETURN_PERIODS
+from .engine import STANDARD_RETURN_PERIODS, B17CEngine
 from .usgs import fetch_nwis_batch
 
 

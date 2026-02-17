@@ -4,7 +4,7 @@ hydrolib.plots - Plotting utilities for flood frequency analysis
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Optional, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,15 +16,17 @@ if TYPE_CHECKING:
 
 def apply_b17c_style():
     """Apply standard B17C plotting style."""
-    plt.rcParams.update({
-        "figure.dpi": 140,
-        "figure.facecolor": "white",
-        "axes.facecolor": "white",
-        "axes.grid": True,
-        "axes.grid.which": "both",
-        "grid.alpha": 0.3,
-        "font.size": 10,
-    })
+    plt.rcParams.update(
+        {
+            "figure.dpi": 140,
+            "figure.facecolor": "white",
+            "axes.facecolor": "white",
+            "axes.grid": True,
+            "axes.grid.which": "both",
+            "grid.alpha": 0.3,
+            "font.size": 10,
+        }
+    )
 
 
 def plotting_positions(flows: Sequence[float]) -> np.ndarray:
@@ -98,8 +100,16 @@ def plot_frequency_curve(
     fig, ax = plt.subplots(figsize=figsize)
 
     # Plot observed data
-    ax.scatter(rp_obs, obs, s=40, c="blue", edgecolors="darkblue",
-               linewidth=0.5, zorder=5, label="Observed Peaks")
+    ax.scatter(
+        rp_obs,
+        obs,
+        s=40,
+        c="blue",
+        edgecolors="darkblue",
+        linewidth=0.5,
+        zorder=5,
+        label="Observed Peaks",
+    )
 
     # Plot fitted curve
     ax.plot(rps, est, "b-", linewidth=2, label="LP3 Fit", zorder=4)
@@ -112,8 +122,9 @@ def plot_frequency_curve(
         q15 = q[1.5]["estimate"]
         q2 = q[2]["estimate"]
         ax.axhspan(q15, q2, alpha=0.15, color="green", zorder=1)
-        ax.text(1.6, (q15 + q2) / 2, "Bankfull", fontsize=9,
-                va="center", ha="left", color="darkgreen")
+        ax.text(
+            1.6, (q15 + q2) / 2, "Bankfull", fontsize=9, va="center", ha="left", color="darkgreen"
+        )
 
     # Formatting
     ax.set_xscale("log")
@@ -217,11 +228,12 @@ def plot_multi_site_comparison(
     fig, ax = plt.subplots(figsize=figsize)
 
     y_pos = np.arange(len(sites))
-    errors = [[e - l for e, l in zip(estimates, lowers)],
-              [u - e for e, u in zip(estimates, uppers)]]
+    errors = [
+        [e - l for e, l in zip(estimates, lowers)],
+        [u - e for e, u in zip(estimates, uppers)],
+    ]
 
-    ax.barh(y_pos, estimates, xerr=errors, align="center",
-            color="steelblue", alpha=0.7, capsize=3)
+    ax.barh(y_pos, estimates, xerr=errors, align="center", color="steelblue", alpha=0.7, capsize=3)
 
     ax.set_yticks(y_pos)
     ax.set_yticklabels(sites)
