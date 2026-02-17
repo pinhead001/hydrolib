@@ -4,91 +4,87 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**peakfq** (package name `peakfq`, repo name `peakfqr`) is a USGS R package (v8.1.0) for flood-frequency analysis following Bulletin 17C guidelines. It combines R for workflow orchestration and a Shiny web UI with Fortran for core statistical computations (EMA algorithm, probability functions). Requires R >= 4.2.0.
+**HydroLib** is a Python library for hydrologic frequency analysis with USGS data retrieval and Bulletin 17C flood frequency analysis. This branch (`dev` in `hybrid-17c-cld`) implements a hybrid Bulletin 17C approach that wraps PeakfqSA (USGS Fortran reference) alongside the existing native EMA implementation.
 
-## Workspace Structure
+**Reference implementation:** `C:\a\hal\_shared\peakfqr` — USGS R package (peakfq v8.1.0) wrapping the same Fortran EMA code. Read `src/` for computation logic, `R/fortranWrappers.R` for call conventions.
 
-This is a VS Code multi-root workspace (`hal.code-workspace`):
-- `_shared/peakfqr/` — The R package (primary codebase)
-- `main/`, `hybrid-17c-cld/`, `hybrid-17c-gcp/` — Deployment targets (currently empty)
-- `_shared/peakfqweb/` — Web app reference materials
-- `_shared/testdata/` — Shared test data
+## Workspace Layout
+
+```
+C:\a\hal\
+├── main/                    # HydroLib main branch (read-only reference)
+├── hybrid-17c-cld/          # This worktree — dev branch for hybrid 17C
+├── _shared/peakfqr/         # USGS R package reference (Fortran + R)
+└── _shared/testdata/        # Shared test data
+```
 
 ## Build & Development Commands
 
-```r
-# Install from source
-remotes::install_gitlab("water/peakfqr", host = "code.usgs.gov")
+```bash
+# Install dependencies
+pip install -e ".[dev]"
 
-# Load package locally for development (use this instead of install during dev)
-pkgload::load_all(attach_testthat = FALSE)
+# Install dev tools
+pip install pytest pytest-cov pytest-mock black isort mypy ruff pandas numpy scipy click rich
 
-# Regenerate documentation from roxygen comments
-devtools::document()
-
-# Build package
-R CMD build . --no-manual
-
-# Check package (mirrors CI)
-devtools::check(document = FALSE, args = "--no-tests", vignettes = FALSE)
-
-# Launch Shiny app locally
-peakfq::peakfq_app()
-```
-
-## Testing
-
-Framework: **testthat**. Tests live in `_shared/peakfqr/tests/testthat/`.
-
-```r
 # Run all tests
-devtools::test()
+pytest tests/ -v
 
 # Run a single test file
-testthat::test_file("tests/testthat/test-fortran.R")
+pytest tests/test_bulletin17c.py -v
 
-# Run tests with JUnit output (CI style)
-devtools::test(reporter = "junit")
+# Run tests excluding PeakfqSA-dependent tests
+pytest tests/ -v -m "not requires_peakfqsa"
 
-# Code coverage
-covr::package_coverage()
+# Coverage
+pytest tests/ --cov=hydrolib --cov-report=term-missing
+
+# Formatting
+black src/ tests/ hydrolib/
+isort src/ tests/ hydrolib/
+
+# Type checking
+mypy src/hydrolib/ --ignore-missing-imports --strict
 ```
 
-Test files: `test-fortran.R`, `test-moments.R`, `test-MOVE3.R`, `test-skewweight.R`, `test-regionalskew.R`. Test data in `inst/extdata/` and `inst/testdata/`.
+## Existing Architecture
 
-## Architecture
+### Package: `hydrolib/`
+- **`core.py`** — Data structures (`PeakRecord`, `FlowInterval`, `EMAParameters`, `FrequencyResults`), enums (`SkewMethod`, `AnalysisMethod`), LP3 utility functions (`kfactor`, `grubbs_beck_critical_value`, `log_pearson3_*`, `compute_ci_lp3`)
+- **`bulletin17c.py`** — Main analysis: `FloodFrequencyAnalysis` (ABC), `MethodOfMoments`, `ExpectedMomentsAlgorithm`, `Bulletin17C` (facade/factory)
+- **`usgs.py`** — `USGSgage` for NWIS data retrieval, `GageAttributes` singleton
+- **`engine.py`** — `B17CEngine` simplified LP3 fitting interface
+- **`batch.py`** — Multi-site parallel analysis
+- **`report.py`** — `HydroReport` technical report generation
+- **`hydrograph.py`** / **`plots.py`** — Visualization
 
-### R Layer (`R/`)
-- **`main.R`** — `peakfq()`: primary analysis entry point. Takes a .psf specification file, returns LP3 parameters, quantiles, empirical data, MGBT results, trends, plots, and logs.
-- **`shinyapp.R`** — `peakfq_app()`: launches the Shiny web interface.
-- **`MOVE3.R`** — Record extension using correlation with index sites.
-- **`readInputs.R`** — Parsers for RDB, PSF (specifications), and WATSTORE formats.
-- **`outputs.R`** — Output generation and CSV export.
-- **`ffaPlot.R`** / **`peakDataPlot.R`** — Flood frequency and data visualization plots.
-- **`fortranWrappers.R`** — R wrappers around compiled Fortran routines via `.Fortran()`.
-
-### Fortran Layer (`src/`)
-- **`emafit.f`** — Expected Moments Algorithm (EMA) for LP3 distribution fitting.
-- **`dcdflib1.f90`** — Probability distribution functions.
-- **`probfun.f`** — Additional probability functions.
-- **`registerDynamicSymbol.c`** — Dynamic symbol registration for R.
-
-### Shiny App (`inst/app/`)
-- **`server.R`** (~97KB) — Main server logic; manages data upload, analysis config, and result display.
-- **`ui.R`** — Multi-tab user interface.
-- **`global.R`** — Shared initialization variables and reactive value structures.
-
-### Specification Files (.psf)
-The `.psf` format is the primary input format. Key fields: `Station`, `PCPT_Thresh`, `Interval`, `SkewOpt`, `GenSkew`, `SkewSE`, `LOType`, `LoThresh`, `Urb/Reg`, `WeightOpt`. See `readPSF()` documentation for full format spec.
+### New Hybrid Modules (being built)
+- **`src/hydrolib/peakfqsa/`** — PeakfqSA subprocess wrapper (config, wrapper, io_converters, parsers, validators)
+- **`src/hydrolib/validation/`** — Comparison engine, benchmarks, reports
+- **`tests/peakfqsa/`**, **`tests/validation/`**, **`tests/integration/`** — Tests
 
 ## Key Conventions
 
-- Documentation uses **roxygen2** (`#'` comments) with markdown enabled. Run `devtools::document()` to regenerate `man/` and `NAMESPACE`.
-- All exported functions are declared in NAMESPACE (auto-generated by roxygen2). 17 public exports including `peakfq()`, `peakfq_app()`, `MOVE3()`, `readRDB()`, `readPSF()`, `emafit()`, `ffaPlot()`.
-- Changes must maintain **Bulletin 17C compliance** — this is a scientifically-rigorous package following published USGS guidelines.
-- Backward compatibility with legacy PeakFQ 7.4.1–7.5.1 specification files is important (though some behaviors differ, documented in README).
-- Peak flow qualification codes (3, 4, 6, 7, 8, C, O) have specific handling rules — see README for details.
+- **Commit frequently** — minimum one commit per step and substep (Step0a, Step1b, etc.). Reference step number in commit message: `feat(peakfqsa): add config module [Step 5]`
+- **Lint and document as you go** — run `black` and `isort` before each commit; write NumPy-format docstrings on all public classes/functions
+- Type hints on all function signatures
+- No bare `except:` — always catch specific exceptions
+- No `print()` in library code — use `logging.getLogger(__name__)`
+- Tests for every public function (happy path + error case minimum)
+- Bulletin 17C compliance is critical — use peakfqr `src/` as the authoritative specification
+- All data in log10 space when interfacing with Fortran conventions (peakfqr logs base-10)
 
-## CI/CD (GitLab)
+## Fortran/R Reference Quick Reference
 
-Pipeline stages: build (Docker image) → check (`devtools::check`) → test (testthat + coverage) → end (deploy). Branches: `main` (production), `develop` (development). Deployment to Posit Connect via `deploy_simple.R`.
+Key Fortran routine: `emafitpr` in `_shared/peakfqr/src/emafit.f`
+- Inputs: n, ql, qu, tl, tu (all log10), dtype, reg_M/mse, reg_SD/mse, r_G/mse, gbthrsh0, pq, nq, eps, wght_opt_n
+- Outputs: cmoms(3,3), yp (quantiles), ci_low, ci_high, var_est, MGBT results (gbval, gbns, gbnzero, gbnlow, gbp, gbqs)
+- R wrapper: `R/fortranWrappers.R` — `emafit()` function shows exact call pattern and output field extraction
+- Skew MSE encoding: 0 = generalized (no error), <0 = generalized (MSE = -value), >0 = weighted, >1e10 = station-only
+- MGBT encoding: gbthrsh0 <= -6 = compute MGBT, > -6 = use as threshold, ~-5.9 = no test
+- Weight options: 1=HWN (Halloween), 2=ERL, 3=INV (PeakFQ 7.4.1)
+
+## Test Data
+
+- Primary validation: Big Sandy River at Bruceton, TN (USGS 03606500) — from PeakfqSA manual
+- Additional fixtures from `_shared/peakfqr/inst/testdata/` and `_shared/peakfqr/tests/testthat/`
