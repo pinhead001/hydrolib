@@ -48,10 +48,35 @@ st.markdown(
     "Generate daily flow plots for USGS gages using [hydrolib](https://github.com/pinhead001/hydrolib)"
 )
 
-# Sidebar inputs
+# ---------------------------------------------------------------------------
+# Session state — initialize before any sidebar widgets reference it
+# ---------------------------------------------------------------------------
+if "gage_data" not in st.session_state:
+    st.session_state.gage_data = {}
+if "gage_info" not in st.session_state:
+    st.session_state.gage_info = {}
+if "figures" not in st.session_state:
+    st.session_state.figures = {}
+if "expanded_gage" not in st.session_state:
+    st.session_state.expanded_gage = None
+if "expanded_plot_idx" not in st.session_state:
+    st.session_state.expanded_plot_idx = 0
+if "peak_data" not in st.session_state:
+    st.session_state.peak_data = {}
+if "ffa_results" not in st.session_state:
+    st.session_state.ffa_results = {}
+if "ffa_results_with_thresholds" not in st.session_state:
+    st.session_state.ffa_results_with_thresholds = {}
+if "perception_thresholds" not in st.session_state:
+    st.session_state.perception_thresholds = {}
+if "ffa_year_range" not in st.session_state:
+    st.session_state.ffa_year_range = {}  # {site_no: (start_yr, end_yr)}
+
+# ---------------------------------------------------------------------------
+# Sidebar — Input Parameters
+# ---------------------------------------------------------------------------
 st.sidebar.header("Input Parameters")
 
-# Gage input - single or multiple
 input_mode = st.sidebar.radio("Input Mode", ["Single Gage", "Multiple Gages"])
 
 if input_mode == "Single Gage":
@@ -63,18 +88,53 @@ else:
         value="09355500\n11066460",
         height=100,
     )
-    # Parse input
     gage_list = [g.strip() for g in gage_input.replace(",", "\n").split("\n") if g.strip()]
 
 st.sidebar.markdown(f"**{len(gage_list)} gage(s) selected**")
 
-# Plot options
+# ---------------------------------------------------------------------------
+# Sidebar — Plot Options
+# ---------------------------------------------------------------------------
 st.sidebar.header("Plot Options")
 show_timeseries = st.sidebar.checkbox("Daily Time Series", value=True)
 show_summary = st.sidebar.checkbox("Summary Hydrograph", value=True)
 show_fdc = st.sidebar.checkbox("Flow Duration Curve", value=True)
 
-# Flood Frequency Analysis section
+# ---------------------------------------------------------------------------
+# Sidebar — Plot Date Range (appears above FFA when data is loaded)
+# ---------------------------------------------------------------------------
+if st.session_state.gage_data:
+    st.sidebar.markdown("---")
+    st.sidebar.header("Plot Date Range")
+    st.sidebar.markdown("*Filter daily flow plots without re-downloading*")
+
+    all_starts = [info["por_start"] for info in st.session_state.gage_info.values()]
+    all_ends = [info["por_end"] for info in st.session_state.gage_info.values()]
+    overall_start = min(all_starts)
+    overall_end = max(all_ends)
+
+    col1, col2 = st.sidebar.columns(2)
+    plot_start = col1.date_input(
+        "Start Date",
+        value=overall_start,
+        min_value=overall_start,
+        max_value=overall_end,
+        key="plot_start",
+    )
+    plot_end = col2.date_input(
+        "End Date",
+        value=overall_end,
+        min_value=overall_start,
+        max_value=overall_end,
+        key="plot_end",
+    )
+
+    if st.sidebar.button("Update Plots", type="secondary"):
+        st.session_state.figures = {}
+
+# ---------------------------------------------------------------------------
+# Sidebar — Flood Frequency Analysis
+# ---------------------------------------------------------------------------
 st.sidebar.markdown("---")
 st.sidebar.subheader("Flood Frequency Analysis")
 enable_ffa = st.sidebar.checkbox("Enable Flood Frequency Analysis", value=False)
@@ -130,27 +190,10 @@ else:
 # Download button
 download_data = st.sidebar.button("Download Data", type="primary")
 
-# Initialize session state
-if "gage_data" not in st.session_state:
-    st.session_state.gage_data = {}  # Stores full daily data for each gage
-if "gage_info" not in st.session_state:
-    st.session_state.gage_info = {}  # Stores site info for each gage
-if "figures" not in st.session_state:
-    st.session_state.figures = {}
-if "expanded_gage" not in st.session_state:
-    st.session_state.expanded_gage = None
-if "expanded_plot_idx" not in st.session_state:
-    st.session_state.expanded_plot_idx = 0
-if "peak_data" not in st.session_state:
-    st.session_state.peak_data = {}
-if "ffa_results" not in st.session_state:
-    st.session_state.ffa_results = {}
-if "ffa_results_with_thresholds" not in st.session_state:
-    st.session_state.ffa_results_with_thresholds = {}
-if "perception_thresholds" not in st.session_state:
-    st.session_state.perception_thresholds = {}
 
-
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
 def get_plot_list(site_no):
     """Get list of available plots for a gage (excluding stats dataframe)."""
     if site_no not in st.session_state.figures:
@@ -182,7 +225,6 @@ def generate_plots(site_no, plot_data, gage_info, por_start_str=None, por_end_st
     """Generate plots for a gage using the provided data."""
     site_figs = {}
 
-    # Daily time series
     if show_timeseries:
         fig1 = Hydrograph.plot_daily_timeseries(
             plot_data,
@@ -194,7 +236,6 @@ def generate_plots(site_no, plot_data, gage_info, por_start_str=None, por_end_st
         )
         site_figs["daily_timeseries"] = fig1
 
-    # Summary hydrograph
     if show_summary:
         fig2 = Hydrograph.plot_summary_hydrograph(
             plot_data,
@@ -206,10 +247,8 @@ def generate_plots(site_no, plot_data, gage_info, por_start_str=None, por_end_st
             por_end=por_end_str,
         )
         site_figs["summary_hydrograph"] = fig2
-        # Store summary stats for export
         site_figs["summary_stats"] = Hydrograph.get_summary_stats(plot_data)
 
-    # Flow duration curve
     if show_fdc:
         fig3, stats_df = Hydrograph.plot_flow_duration_curve(
             plot_data,
@@ -225,7 +264,9 @@ def generate_plots(site_no, plot_data, gage_info, por_start_str=None, por_end_st
     return site_figs
 
 
+# ---------------------------------------------------------------------------
 # Download data when button clicked
+# ---------------------------------------------------------------------------
 if download_data and gage_list:
     st.session_state.gage_data = {}
     st.session_state.gage_info = {}
@@ -234,6 +275,7 @@ if download_data and gage_list:
     st.session_state.ffa_results = {}
     st.session_state.ffa_results_with_thresholds = {}
     st.session_state.perception_thresholds = {}
+    st.session_state.ffa_year_range = {}
 
     progress_bar = st.progress(0)
     status_text = st.empty()
@@ -242,19 +284,15 @@ if download_data and gage_list:
         status_text.text(f"Fetching site info for {site_no}...")
 
         try:
-            # Create gage object and fetch site info (including POR)
             gage = USGSgage(site_no)
             gage.fetch_site_info()
 
             status_text.text(f"Downloading data for {site_no}...")
 
-            # Download entire period of record using POR dates from site info
-            # USGS API returns limited data without date range, so use POR dates
             start_dt = gage.daily_por_start if gage.daily_por_start else "1900-01-01"
             end_dt = gage.daily_por_end if gage.daily_por_end else None
             daily_data = gage.download_daily_flow(start_date=start_dt, end_date=end_dt)
 
-            # Store gage info
             site_name_display = gage.site_name or "Unknown"
             por_start_date = daily_data.index.min()
             por_end_date = daily_data.index.max()
@@ -269,10 +307,8 @@ if download_data and gage_list:
                 "longitude": gage.longitude,
             }
 
-            # Store full daily data
             st.session_state.gage_data[site_no] = daily_data
 
-            # Download peak flows and run FFA if enabled
             if enable_ffa:
                 with st.spinner(f"Downloading peak flows for {site_no}..."):
                     try:
@@ -302,46 +338,18 @@ if download_data and gage_list:
 
     status_text.text("Download complete!")
     plt.close("all")
-    st.rerun()  # Refresh page to display plots with new data
+    st.rerun()
 
 
-# Show plot date range controls only if data is loaded
+# ---------------------------------------------------------------------------
+# Main content — generate and display plots for each gage
+# ---------------------------------------------------------------------------
 if st.session_state.gage_data:
-    st.sidebar.header("Plot Date Range")
-    st.sidebar.markdown("*Filter plots without re-downloading*")
-
-    # Get overall date range from all loaded gages
-    all_starts = [info["por_start"] for info in st.session_state.gage_info.values()]
-    all_ends = [info["por_end"] for info in st.session_state.gage_info.values()]
-    overall_start = min(all_starts)
-    overall_end = max(all_ends)
-
-    col1, col2 = st.sidebar.columns(2)
-    plot_start = col1.date_input(
-        "Start Date",
-        value=overall_start,
-        min_value=overall_start,
-        max_value=overall_end,
-        key="plot_start",
-    )
-    plot_end = col2.date_input(
-        "End Date",
-        value=overall_end,
-        min_value=overall_start,
-        max_value=overall_end,
-        key="plot_end",
-    )
-
-    # Update plots button
-    if st.sidebar.button("Update Plots", type="secondary"):
-        st.session_state.figures = {}
-
-    # Generate/display plots for each gage
     for site_no in st.session_state.gage_data.keys():
         gage_info = st.session_state.gage_info[site_no]
         full_data = st.session_state.gage_data[site_no]
 
-        # Filter data for plot date range
+        # Filter daily data for plot date range
         plot_data = full_data[
             (full_data.index >= pd.Timestamp(plot_start))
             & (full_data.index <= pd.Timestamp(plot_end))
@@ -351,15 +359,13 @@ if st.session_state.gage_data:
             st.warning(f"No data for {site_no} in selected date range")
             continue
 
-        # Display gage header
+        # ── Gage header ───────────────────────────────────────────────────
         st.subheader(f"USGS {site_no} - {gage_info['name']}")
 
-        # Format POR and plot dates
         por_str = f"{format_date(gage_info['por_start'])} - {format_date(gage_info['por_end'])}"
         plot_str = f"{format_date(plot_data.index.min())} - {format_date(plot_data.index.max())}"
         da_str = f"{gage_info['drainage_area']:,.1f} sq mi" if gage_info["drainage_area"] else "N/A"
 
-        # Display info
         info_cols = st.columns(4)
         info_cols[0].markdown(
             f"**Drainage Area**<br><small>{da_str}</small>", unsafe_allow_html=True
@@ -373,9 +379,8 @@ if st.session_state.gage_data:
             unsafe_allow_html=True,
         )
 
-        # Generate plots if not cached or need refresh
+        # ── Daily flow plots ──────────────────────────────────────────────
         if site_no not in st.session_state.figures:
-            # Determine if we need to show POR annotation (when plot range differs from POR)
             por_start_str = None
             por_end_str = None
             if (
@@ -391,15 +396,92 @@ if st.session_state.gage_data:
 
         site_figs = st.session_state.figures[site_no]
 
-        # Determine columns based on selected plots
-        plot_keys = [k for k in site_figs.keys() if not k.endswith("_stats")]
+        plot_keys = [k for k in site_figs.keys() if not k.endswith("_stats") and not k.endswith("_data")]
         if plot_keys:
             cols = st.columns(len(plot_keys))
             for i, plot_key in enumerate(plot_keys):
                 with cols[i]:
                     st.pyplot(site_figs[plot_key])
 
-        # Frequency curve plot
+        # ── Peak flow analysis separator ──────────────────────────────────
+        _peak_raw = st.session_state.peak_data.get(site_no)
+        if enable_ffa and _peak_raw is not None:
+            st.divider()
+            st.markdown("#### Peak Flow Frequency Analysis")
+
+            # FFA date range controls
+            min_wy = int(_peak_raw["water_year"].min())
+            max_wy = int(_peak_raw["water_year"].max())
+            _stored_wy = st.session_state.ffa_year_range.get(site_no, (min_wy, max_wy))
+
+            col_yr1, col_yr2, col_recalc = st.columns([2, 2, 3])
+            ffa_start_yr = col_yr1.number_input(
+                "FFA Start Year",
+                min_value=min_wy,
+                max_value=max_wy,
+                value=int(_stored_wy[0]),
+                step=1,
+                key=f"ffa_start_{site_no}",
+            )
+            ffa_end_yr = col_yr2.number_input(
+                "FFA End Year",
+                min_value=min_wy,
+                max_value=max_wy,
+                value=int(_stored_wy[1]),
+                step=1,
+                key=f"ffa_end_{site_no}",
+            )
+            with col_recalc:
+                st.write("\u00a0")  # vertical spacer to align button with inputs
+                recalc_clicked = st.button(
+                    "Recalculate FFA",
+                    key=f"recalc_ffa_{site_no}",
+                    help="Re-run flood frequency analysis using only peaks within the selected year range.",
+                )
+
+            if recalc_clicked:
+                _r_mask = (
+                    (_peak_raw["water_year"] >= ffa_start_yr)
+                    & (_peak_raw["water_year"] <= ffa_end_yr)
+                )
+                _filtered = _peak_raw[_r_mask]
+                if len(_filtered) < 5:
+                    st.warning(
+                        f"Only {len(_filtered)} peak(s) in {ffa_start_yr}–{ffa_end_yr}. "
+                        "Results will be unreliable."
+                    )
+                else:
+                    with st.spinner(
+                        f"Re-running FFA for {site_no} ({ffa_start_yr}–{ffa_end_yr})…"
+                    ):
+                        _recalc = run_ffa(
+                            peak_flows=_filtered["peak_flow_cfs"].values,
+                            water_years=_filtered["water_year"].values.astype(int),
+                            regional_skew=regional_skew,
+                            regional_skew_se=regional_skew_se,
+                        )
+                    st.session_state.ffa_results[site_no] = _recalc
+                    st.session_state.ffa_year_range[site_no] = (int(ffa_start_yr), int(ffa_end_yr))
+                    st.session_state.ffa_results_with_thresholds.pop(site_no, None)
+                    if _recalc.get("error"):
+                        st.error(f"FFA error: {_recalc['error']}")
+                    else:
+                        st.rerun()
+
+            # Filtered peak_df used for all FFA computations below
+            _wy = st.session_state.ffa_year_range.get(site_no)
+            if _wy:
+                _ffa_mask = (
+                    (_peak_raw["water_year"] >= _wy[0])
+                    & (_peak_raw["water_year"] <= _wy[1])
+                )
+                peak_df_for_ffa = _peak_raw[_ffa_mask]
+            else:
+                peak_df_for_ffa = _peak_raw
+        else:
+            peak_df_for_ffa = None
+
+        # ── Frequency curve plot ──────────────────────────────────────────
         if show_freq_curve and site_no in st.session_state.ffa_results:
             ffa_result = st.session_state.ffa_results[site_no]
             if not ffa_result.get("error") and ffa_result.get("b17c"):
@@ -414,7 +496,6 @@ if st.session_state.gage_data:
                 ]
                 skew_curves = build_skew_curves_dict(ffa_result, selected_skew_labels) or None
 
-                # Build extra_curves for perception-threshold-aware overlay
                 extra_curves = None
                 if show_threshold_curve:
                     thr_res = st.session_state.ffa_results_with_thresholds.get(site_no)
@@ -438,7 +519,7 @@ if st.session_state.gage_data:
                 )
                 st.pyplot(freq_fig)
 
-        # FFA results expander
+        # ── FFA results expander ──────────────────────────────────────────
         if enable_ffa and site_no in st.session_state.ffa_results:
             ffa_result = st.session_state.ffa_results[site_no]
             if not ffa_result.get("error"):
@@ -455,15 +536,14 @@ if st.session_state.gage_data:
 
                 with st.expander("Flood Frequency Results", expanded=False):
                     # Station summary table (PeakFQ-style)
-                    peak_df_site = st.session_state.peak_data.get(site_no)
-                    if peak_df_site is not None and not ffa_result.get("error") and ffa_result.get("b17c"):
+                    if peak_df_for_ffa is not None and ffa_result.get("b17c"):
                         st.markdown("**Station Summary**")
                         primary_label = (
                             selected_skew_labels[0] if selected_skew_labels else "Weighted Skew"
                         )
                         summary_df = build_station_summary_df(
                             site_no=site_no,
-                            peak_df=peak_df_site,
+                            peak_df=peak_df_for_ffa,
                             ffa_result=ffa_result,
                             regional_skew=regional_skew,
                             regional_skew_se=regional_skew_se,
@@ -502,18 +582,16 @@ if st.session_state.gage_data:
                             use_container_width=True,
                         )
 
-                    # Threshold-aware frequency tables (when checkbox is on and analysis applied)
+                    # Threshold-aware frequency tables
                     if show_threshold_curve:
                         thr_res = st.session_state.ffa_results_with_thresholds.get(site_no)
                         if thr_res and not thr_res.get("error") and thr_res.get("b17c"):
                             r_thr = thr_res["b17c"].results
                             st.markdown("---")
-                            n_ext = r_thr.n_peaks
-                            n_sys_thr = r_thr.n_systematic
-                            n_cen_thr = r_thr.n_censored
                             st.markdown(
                                 f"**Perception Threshold Analysis** — record extended to "
-                                f"{n_ext} peaks ({n_sys_thr} systematic + {n_cen_thr} censored)"
+                                f"{r_thr.n_peaks} peaks "
+                                f"({r_thr.n_systematic} systematic + {r_thr.n_censored} censored)"
                             )
                             thr_skew_tables = compute_skew_tables(thr_res, selected_skew_labels)
                             if thr_skew_tables:
@@ -534,9 +612,8 @@ if st.session_state.gage_data:
                                     use_container_width=True,
                                 )
 
-        # Peak flow record & perception thresholds expander
-        if enable_ffa and st.session_state.peak_data.get(site_no) is not None:
-            peak_df_site = st.session_state.peak_data[site_no]
+        # ── Peak flow record & perception thresholds expander ─────────────
+        if enable_ffa and _peak_raw is not None:
             with st.expander("Peak Flow Record & Perception Thresholds", expanded=False):
                 st.markdown(
                     "Define time periods when only peaks **above** a certain level were observed "
@@ -544,6 +621,16 @@ if st.session_state.gage_data:
                     "Each period adds left-censored intervals to EMA — click **Apply** to "
                     "re-run the analysis and overlay the result on the frequency curve."
                 )
+
+                # Show note when a custom FFA year range is active
+                _wy_active = st.session_state.ffa_year_range.get(site_no)
+                if _wy_active:
+                    st.info(
+                        f"FFA is using peaks from **{_wy_active[0]}–{_wy_active[1]}** "
+                        f"({len(peak_df_for_ffa)} peaks). "
+                        "The chart below shows the full record for context. "
+                        "The threshold analysis will also use the filtered year range."
+                    )
 
                 thr_df_init = pd.DataFrame(
                     {
@@ -594,11 +681,11 @@ if st.session_state.gage_data:
                     except (ValueError, TypeError, KeyError):
                         pass
 
-                # Always persist current thresholds to session state (drives peak flow plot)
                 st.session_state.perception_thresholds[site_no] = thresholds
 
+                # Bar chart uses full peak record for context
                 peak_fig = plot_peak_flows_with_thresholds(
-                    peak_df_site,
+                    _peak_raw,
                     site_name=gage_info.get("name", ""),
                     site_no=site_no,
                     thresholds=thresholds or None,
@@ -606,7 +693,7 @@ if st.session_state.gage_data:
                 st.pyplot(peak_fig)
                 plt.close(peak_fig)
 
-                # Apply button + status
+                # Apply button + status — FFA re-run uses filtered year range
                 col_btn, col_status = st.columns([1, 2])
                 with col_btn:
                     apply_clicked = st.button(
@@ -618,8 +705,8 @@ if st.session_state.gage_data:
                 if apply_clicked:
                     with st.spinner("Re-running EMA with perception thresholds…"):
                         thr_run = run_ffa(
-                            peak_flows=peak_df_site["peak_flow_cfs"].values,
-                            water_years=peak_df_site["water_year"].values.astype(int),
+                            peak_flows=peak_df_for_ffa["peak_flow_cfs"].values,
+                            water_years=peak_df_for_ffa["water_year"].values.astype(int),
                             regional_skew=regional_skew,
                             regional_skew_se=regional_skew_se,
                             perception_thresholds=thresholds,
@@ -641,7 +728,7 @@ if st.session_state.gage_data:
 
         st.divider()
 
-    # Multi-gage FFA comparison
+    # ── Multi-gage FFA comparison ─────────────────────────────────────────
     if enable_ffa and len(gage_list) > 1:
         sites_with_ffa = [
             s
@@ -659,10 +746,13 @@ if st.session_state.gage_data:
                 ].values
                 q100_val = int(q100[0]) if len(q100) > 0 else None
                 attrs = st.session_state.gage_info.get(sno, {})
+                _wy_cmp = st.session_state.ffa_year_range.get(sno)
+                yr_range_str = f"{_wy_cmp[0]}–{_wy_cmp[1]}" if _wy_cmp else "Full record"
                 rows.append(
                     {
                         "Site No": sno,
                         "Site Name": attrs.get("name", sno),
+                        "FFA Year Range": yr_range_str,
                         "100-yr Flow (cfs)": f"{q100_val:,}" if q100_val else "N/A",
                         "Weighted Skew": f"{r['parameters']['skew_weighted']:.3f}",
                         "Method": r.get("method", "ema").upper(),
@@ -674,11 +764,12 @@ if st.session_state.gage_data:
     plt.close("all")
 
 
+# ---------------------------------------------------------------------------
 # Export section
+# ---------------------------------------------------------------------------
 if st.session_state.gage_data:
     st.sidebar.header("Export")
 
-    # Select which gages to export
     selected_gages = st.sidebar.multiselect(
         "Select gages to export",
         options=list(st.session_state.gage_data.keys()),
@@ -686,7 +777,6 @@ if st.session_state.gage_data:
     )
 
     if selected_gages:
-        # Create ZIP file in memory
         zip_buffer = io.BytesIO()
 
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -695,35 +785,32 @@ if st.session_state.gage_data:
                 full_data = st.session_state.gage_data[site_no]
                 site_figs = st.session_state.figures.get(site_no, {})
 
-                # Export daily flow data CSV
+                # Daily flow CSV
                 csv_buffer = io.StringIO()
                 export_df = full_data.copy()
                 export_df.index.name = "date"
                 export_df.to_csv(csv_buffer)
                 zf.writestr(f"{site_no}/daily_flow.csv", csv_buffer.getvalue())
 
-                # Export plots as PNG
+                # Plots as PNG / stats as CSV
                 for name, fig in site_figs.items():
                     if name.endswith("_stats"):
-                        # Export stats as CSV
                         csv_buffer = io.StringIO()
                         fig.to_csv(csv_buffer, index=False)
                         zf.writestr(f"{site_no}/{name}.csv", csv_buffer.getvalue())
                     else:
-                        # Save PNG
                         img_buffer = io.BytesIO()
                         fig.savefig(img_buffer, format="png", dpi=300, bbox_inches="tight")
                         img_buffer.seek(0)
                         zf.writestr(f"{site_no}/{name}.png", img_buffer.read())
 
-                # Export summary stats if not already in figures
                 if "summary_stats" not in site_figs and show_summary:
                     summary_stats = Hydrograph.get_summary_stats(full_data)
                     csv_buffer = io.StringIO()
                     summary_stats.to_csv(csv_buffer, index=False)
                     zf.writestr(f"{site_no}/summary_stats.csv", csv_buffer.getvalue())
 
-                # Export FFA results
+                # FFA export
                 if enable_ffa and site_no in st.session_state.ffa_results:
                     ffa_result = st.session_state.ffa_results[site_no]
                     if not ffa_result.get("error"):
@@ -741,7 +828,6 @@ if st.session_state.gage_data:
                         )
                         freq_fig_for_export = None
                         if show_freq_curve and ffa_result.get("b17c"):
-                            # Include threshold overlay on exported freq curve if active
                             extra_curves_export = None
                             if show_threshold_curve:
                                 thr_exp = st.session_state.ffa_results_with_thresholds.get(site_no)
@@ -764,7 +850,7 @@ if st.session_state.gage_data:
                             )
                         export_ffa_to_zip(zf, site_no, ffa_result, freq_fig_for_export)
 
-                        # Export threshold-aware analysis when checkbox is on
+                        # Threshold-aware export
                         if show_threshold_curve:
                             thr_exp = st.session_state.ffa_results_with_thresholds.get(site_no)
                             if thr_exp and not thr_exp.get("error") and thr_exp.get("b17c"):
@@ -779,7 +865,6 @@ if st.session_state.gage_data:
                                         f"{site_no}/freq_table_w_thresholds_{lbl_clean}.csv",
                                         csv_buf.getvalue(),
                                     )
-                                # LP3 parameters for threshold run
                                 csv_buf = io.StringIO()
                                 format_parameters_df(thr_exp["parameters"]).to_csv(
                                     csv_buf, index=False
@@ -789,7 +874,7 @@ if st.session_state.gage_data:
                                     csv_buf.getvalue(),
                                 )
 
-            # Multi-gage FFA comparison CSV
+            # Multi-gage comparison CSV
             if enable_ffa and len(selected_gages) > 1:
                 site_results_for_export = {}
                 for sno in selected_gages:
