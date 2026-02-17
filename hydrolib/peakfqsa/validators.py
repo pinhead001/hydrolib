@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 from hydrolib.peakfqsa.parsers import PeakfqSAResult
+from hydrolib.validation.comparisons import FrequencyComparator
 
 logger = logging.getLogger(__name__)
 
@@ -42,5 +43,32 @@ def validate_against_expected(
     dict[str, Any]
         Validation report with keys: passed, max_diff_pct, details.
     """
-    # TODO: Implement validation logic
-    raise NotImplementedError
+    # Build a reference PeakfqSAResult from expected values
+    reference = PeakfqSAResult(
+        parameters=expected_parameters or {},
+        quantiles=expected_quantiles,
+        confidence_intervals=expected_ci or {},
+    )
+
+    # Build native-style dict from the result being validated
+    native = {
+        "parameters": dict(result.parameters),
+        "quantiles": dict(result.quantiles),
+        "confidence_intervals": dict(result.confidence_intervals),
+    }
+
+    comparator = FrequencyComparator(
+        tolerance_pct=tolerance_pct,
+        parameter_tolerance_pct=tolerance_pct,
+        ci_tolerance_pct=tolerance_pct * 2,
+    )
+    comparison = comparator.compare(native, reference)
+
+    return {
+        "passed": comparison.passed,
+        "max_diff_pct": comparison.max_diff_pct,
+        "summary": comparison.summary,
+        "parameter_diffs": comparison.parameter_diffs,
+        "quantile_diffs": comparison.quantile_diffs,
+        "ci_diffs": comparison.ci_diffs,
+    }
