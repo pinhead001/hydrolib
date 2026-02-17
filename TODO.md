@@ -338,12 +338,16 @@ subroutine emafitpr(n, ql, qu, tl, tu, dtype,
 
 ---
 
+## Resolved Questions
+
+- ✅ PeakfqSA: Not a standalone binary. Use peakfqr `src/` Fortran as reference code.
+- ✅ Project root: `C:\a\hal\hybrid-17c-cld`
+- ✅ Python: 3.12 with pip (no venv manager)
+- ✅ Regional skew defaults: -0.302 / MSE 0.3025 (Bulletin 17C national map)
+- ✅ Git: Commit to dev branch, no push unless asked
+
 ## Open Questions
 
-- ❓ Where is PeakfqSA executable? (Step 1)
-- ❓ Python version and venv manager? (Step 1)
-- ❓ Regional skew defaults for testing? (Step 1)
-- ❓ Git push preferences? (Step 1)
 - ❓ FrequencyAnalyzer API modification approach? (Step 10)
 
 ## Dependencies to Install

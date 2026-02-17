@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **HydroLib** is a Python library for hydrologic frequency analysis with USGS data retrieval and Bulletin 17C flood frequency analysis. This branch (`dev` in `hybrid-17c-cld`) implements a hybrid Bulletin 17C approach that wraps PeakfqSA (USGS Fortran reference) alongside the existing native EMA implementation.
 
-**Reference implementation:** `C:\a\hal\_shared\peakfqr` — USGS R package (peakfq v8.1.0) wrapping the same Fortran EMA code. Read `src/` for computation logic, `R/fortranWrappers.R` for call conventions.
+**Reference implementation:** `C:\a\hal\_shared\peakfqr` — USGS R package (peakfq v8.1.0) containing the most recent working copy of the Fortran EMA code. This is the authoritative reference (not a standalone PeakfqSA binary). Read `src/` for computation logic, `R/fortranWrappers.R` for call conventions.
 
 ## Workspace Layout
 
