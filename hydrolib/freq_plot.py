@@ -33,6 +33,9 @@ _SKEW_STYLE: Dict[str, Tuple[str, str]] = {
 # Fallback palette when label not in _SKEW_STYLE
 _FALLBACK_COLORS = ["steelblue", "k", "darkorange", "forestgreen"]
 
+# Style for threshold-aware extra curves: dashed purple
+_EXTRA_CURVE_COLOR = "mediumorchid"
+
 
 def _lp3_quantiles(
     mean_log: float,
@@ -67,6 +70,7 @@ def plot_frequency_curve_streamlit(
     site_no: Optional[str] = None,
     figsize: Tuple[int, int] = (10, 6),
     skew_curves: Optional[Dict[str, float]] = None,
+    extra_curves: Optional[Dict[str, Tuple[float, float, float, int]]] = None,
 ) -> plt.Figure:
     """Plot a Bulletin 17C frequency curve suitable for Streamlit display.
 
@@ -81,11 +85,15 @@ def plot_frequency_curve_streamlit(
     figsize : tuple
         Figure size in inches.
     skew_curves : dict[str, float], optional
-        Mapping of ``{label: skew_value}`` for each LP3 curve to draw.
-        When None or a single entry, one black curve (like the summary
-        hydrograph median line) is drawn.  With multiple entries each curve
-        gets a distinct color with its own 90% CI band.
+        Mapping of ``{label: skew_value}`` for each LP3 curve to draw using
+        the fitted mean_log / std_log.  When None or a single entry, one black
+        curve (like the summary hydrograph median line) is drawn.
         Example: ``{"Station Skew": -0.15, "Weighted Skew": -0.22}``.
+    extra_curves : dict[str, tuple[float, float, float, int]], optional
+        Additional LP3 parameter sets to overlay, each as
+        ``{label: (mean_log, std_log, skew, n_systematic)}``.  Used to show
+        perception-threshold-aware EMA results alongside the base analysis.
+        Plotted in dashed purple so they are visually distinct.
 
     Returns
     -------
@@ -158,6 +166,24 @@ def plot_frequency_curve_streamlit(
         ax.fill_between(x_cl, lower, upper, alpha=0.12, color=color)
         ax.plot(x_cl, lower, color=color, linestyle="--", linewidth=0.7, alpha=0.55)
         ax.plot(x_cl, upper, color=color, linestyle="--", linewidth=0.7, alpha=0.55)
+
+    # --- Extra curves (e.g. perception-threshold-aware analysis) ---
+    if extra_curves:
+        for label, (ec_mean, ec_std, ec_skew, ec_n) in extra_curves.items():
+            Q_ec = _lp3_quantiles(ec_mean, ec_std, ec_skew, aep_fine)
+            ax.plot(
+                x_curve,
+                Q_ec,
+                color=_EXTRA_CURVE_COLOR,
+                linestyle="--",
+                linewidth=1.5,
+                label=label,
+                zorder=4,
+            )
+            lower_ec, upper_ec = _lp3_ci(ec_mean, ec_std, ec_skew, ec_n, aep_ci)
+            ax.fill_between(x_cl, lower_ec, upper_ec, alpha=0.10, color=_EXTRA_CURVE_COLOR)
+            ax.plot(x_cl, lower_ec, color=_EXTRA_CURVE_COLOR, linestyle=":", linewidth=0.7, alpha=0.55)
+            ax.plot(x_cl, upper_ec, color=_EXTRA_CURVE_COLOR, linestyle=":", linewidth=0.7, alpha=0.55)
 
     # --- Low outlier threshold ---
     if r.low_outlier_threshold > 0 and r.n_low_outliers > 0:

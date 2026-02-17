@@ -452,6 +452,24 @@ class ExpectedMomentsAlgorithm(FloodFrequencyAnalysis):
                         )
                     )
 
+        # User-defined perception thresholds: add left-censored intervals for every
+        # year in [start, end] not already covered by systematic or historical data.
+        # Each such year contributes the information "peak was below threshold".
+        if self._perception_thresholds:
+            covered_years = {i.year for i in intervals}
+            for (start, end), threshold in self._perception_thresholds.items():
+                for year in range(int(start), int(end) + 1):
+                    if year not in covered_years:
+                        intervals.append(
+                            FlowInterval.from_censored(
+                                lower=0,
+                                upper=threshold,
+                                year=year,
+                                perception_threshold=threshold,
+                            )
+                        )
+                        covered_years.add(year)
+
         self._intervals = sorted(intervals, key=lambda x: x.year)
         return self._intervals
 

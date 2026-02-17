@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.ffa_export import export_comparison_csv, export_ffa_to_zip
 from app.ffa_runner import (
+    B17C_DEFAULT_SKEW,
     SKEW_OPTIONS,
     build_skew_curves_dict,
     build_station_summary_df,
@@ -92,18 +93,39 @@ if enable_ffa:
         format="%.2f",
         help="Standard error of the regional skew estimate. Nationwide default: 0.55",
     )
+    _auto_skew_source = (
+        "B17C 2019 (Nationwide)"
+        if abs(regional_skew - B17C_DEFAULT_SKEW) < 5e-4
+        else "User-defined"
+    )
+    map_skew_source = st.sidebar.text_input(
+        "Map Skew Source",
+        value=_auto_skew_source,
+        help=(
+            "Source for the regional skew value. Auto-detected as "
+            "'B17C 2019 (Nationwide)' when using the default (−0.302). "
+            "Edit freely to reflect a state or regional study."
+        ),
+    )
     show_freq_curve = st.sidebar.checkbox("Frequency Curve", value=True)
     st.sidebar.markdown("**Skew Options**")
     skew_station_on = st.sidebar.checkbox("Station Skew", value=False)
     skew_weighted_on = st.sidebar.checkbox("Weighted Skew", value=True)
     skew_regional_on = st.sidebar.checkbox("Regional Skew", value=False)
+    show_threshold_curve = st.sidebar.checkbox(
+        "Perception Thresholds",
+        value=False,
+        help="Overlay the EMA curve re-run with user-defined perception thresholds.",
+    )
 else:
     regional_skew = -0.302
     regional_skew_se = 0.55
+    map_skew_source = "B17C 2019 (Nationwide)"
     show_freq_curve = False
     skew_station_on = False
     skew_weighted_on = True
     skew_regional_on = False
+    show_threshold_curve = False
 
 # Download button
 download_data = st.sidebar.button("Download Data", type="primary")
@@ -123,6 +145,10 @@ if "peak_data" not in st.session_state:
     st.session_state.peak_data = {}
 if "ffa_results" not in st.session_state:
     st.session_state.ffa_results = {}
+if "ffa_results_with_thresholds" not in st.session_state:
+    st.session_state.ffa_results_with_thresholds = {}
+if "perception_thresholds" not in st.session_state:
+    st.session_state.perception_thresholds = {}
 
 
 def get_plot_list(site_no):
@@ -206,6 +232,8 @@ if download_data and gage_list:
     st.session_state.figures = {}
     st.session_state.peak_data = {}
     st.session_state.ffa_results = {}
+    st.session_state.ffa_results_with_thresholds = {}
+    st.session_state.perception_thresholds = {}
 
     progress_bar = st.progress(0)
     status_text = st.empty()
@@ -385,11 +413,28 @@ if st.session_state.gage_data:
                     if on
                 ]
                 skew_curves = build_skew_curves_dict(ffa_result, selected_skew_labels) or None
+
+                # Build extra_curves for perception-threshold-aware overlay
+                extra_curves = None
+                if show_threshold_curve:
+                    thr_res = st.session_state.ffa_results_with_thresholds.get(site_no)
+                    if thr_res and not thr_res.get("error") and thr_res.get("b17c"):
+                        r_thr = thr_res["b17c"].results
+                        extra_curves = {
+                            "With Perception Thresholds": (
+                                r_thr.mean_log,
+                                r_thr.std_log,
+                                r_thr.skew_used,
+                                r_thr.n_systematic or r_thr.n_peaks,
+                            )
+                        }
+
                 freq_fig = plot_frequency_curve_streamlit(
                     ffa_result["b17c"],
                     site_name=gage_info.get("name", ""),
                     site_no=site_no,
                     skew_curves=skew_curves,
+                    extra_curves=extra_curves,
                 )
                 st.pyplot(freq_fig)
 
@@ -425,6 +470,7 @@ if st.session_state.gage_data:
                             primary_skew_label=primary_label,
                             latitude=gage_info.get("latitude"),
                             longitude=gage_info.get("longitude"),
+                            map_skew_source=map_skew_source,
                         )
                         st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
@@ -456,6 +502,38 @@ if st.session_state.gage_data:
                             use_container_width=True,
                         )
 
+                    # Threshold-aware frequency tables (when checkbox is on and analysis applied)
+                    if show_threshold_curve:
+                        thr_res = st.session_state.ffa_results_with_thresholds.get(site_no)
+                        if thr_res and not thr_res.get("error") and thr_res.get("b17c"):
+                            r_thr = thr_res["b17c"].results
+                            st.markdown("---")
+                            n_ext = r_thr.n_peaks
+                            n_sys_thr = r_thr.n_systematic
+                            n_cen_thr = r_thr.n_censored
+                            st.markdown(
+                                f"**Perception Threshold Analysis** — record extended to "
+                                f"{n_ext} peaks ({n_sys_thr} systematic + {n_cen_thr} censored)"
+                            )
+                            thr_skew_tables = compute_skew_tables(thr_res, selected_skew_labels)
+                            if thr_skew_tables:
+                                for label, tbl in thr_skew_tables.items():
+                                    st.markdown(
+                                        f"**Threshold Frequency Table — {label}** "
+                                        "(Return intervals 1.5–500 years)"
+                                    )
+                                    st.dataframe(
+                                        format_quantile_df(tbl), use_container_width=True
+                                    )
+                            else:
+                                st.markdown(
+                                    "**Threshold Frequency Table** (Return intervals 1.5–500 years)"
+                                )
+                                st.dataframe(
+                                    format_quantile_df(thr_res["quantile_df"]),
+                                    use_container_width=True,
+                                )
+
         # Peak flow record & perception thresholds expander
         if enable_ffa and st.session_state.peak_data.get(site_no) is not None:
             peak_df_site = st.session_state.peak_data[site_no]
@@ -463,7 +541,8 @@ if st.session_state.gage_data:
                 st.markdown(
                     "Define time periods when only peaks **above** a certain level were observed "
                     "and recorded (e.g., historical periods before systematic gauging). "
-                    "Enter one row per threshold period."
+                    "Each period adds left-censored intervals to EMA — click **Apply** to "
+                    "re-run the analysis and overlay the result on the frequency curve."
                 )
 
                 thr_df_init = pd.DataFrame(
@@ -515,6 +594,9 @@ if st.session_state.gage_data:
                     except (ValueError, TypeError, KeyError):
                         pass
 
+                # Always persist current thresholds to session state (drives peak flow plot)
+                st.session_state.perception_thresholds[site_no] = thresholds
+
                 peak_fig = plot_peak_flows_with_thresholds(
                     peak_df_site,
                     site_name=gage_info.get("name", ""),
@@ -523,6 +605,39 @@ if st.session_state.gage_data:
                 )
                 st.pyplot(peak_fig)
                 plt.close(peak_fig)
+
+                # Apply button + status
+                col_btn, col_status = st.columns([1, 2])
+                with col_btn:
+                    apply_clicked = st.button(
+                        "Apply Thresholds to Analysis",
+                        key=f"apply_thr_{site_no}",
+                        disabled=(len(thresholds) == 0),
+                        help="Re-run EMA incorporating the threshold periods above.",
+                    )
+                if apply_clicked:
+                    with st.spinner("Re-running EMA with perception thresholds…"):
+                        thr_run = run_ffa(
+                            peak_flows=peak_df_site["peak_flow_cfs"].values,
+                            water_years=peak_df_site["water_year"].values.astype(int),
+                            regional_skew=regional_skew,
+                            regional_skew_se=regional_skew_se,
+                            perception_thresholds=thresholds,
+                        )
+                        st.session_state.ffa_results_with_thresholds[site_no] = thr_run
+                    st.rerun()
+                with col_status:
+                    thr_stored = st.session_state.ffa_results_with_thresholds.get(site_no)
+                    if thr_stored:
+                        if not thr_stored.get("error") and thr_stored.get("b17c"):
+                            r_t = thr_stored["b17c"].results
+                            st.success(
+                                f"Applied — {len(st.session_state.perception_thresholds.get(site_no, []))} "
+                                f"period(s), {r_t.n_peaks} total peaks "
+                                f"({r_t.n_systematic} sys + {r_t.n_censored} censored)"
+                            )
+                        else:
+                            st.error(f"Analysis error: {thr_stored.get('error')}")
 
         st.divider()
 
@@ -626,13 +741,53 @@ if st.session_state.gage_data:
                         )
                         freq_fig_for_export = None
                         if show_freq_curve and ffa_result.get("b17c"):
+                            # Include threshold overlay on exported freq curve if active
+                            extra_curves_export = None
+                            if show_threshold_curve:
+                                thr_exp = st.session_state.ffa_results_with_thresholds.get(site_no)
+                                if thr_exp and not thr_exp.get("error") and thr_exp.get("b17c"):
+                                    r_texp = thr_exp["b17c"].results
+                                    extra_curves_export = {
+                                        "With Perception Thresholds": (
+                                            r_texp.mean_log,
+                                            r_texp.std_log,
+                                            r_texp.skew_used,
+                                            r_texp.n_systematic or r_texp.n_peaks,
+                                        )
+                                    }
                             freq_fig_for_export = plot_frequency_curve_streamlit(
                                 ffa_result["b17c"],
                                 site_name=gage_info.get("name", ""),
                                 site_no=site_no,
                                 skew_curves=skew_curves_export,
+                                extra_curves=extra_curves_export,
                             )
                         export_ffa_to_zip(zf, site_no, ffa_result, freq_fig_for_export)
+
+                        # Export threshold-aware analysis when checkbox is on
+                        if show_threshold_curve:
+                            thr_exp = st.session_state.ffa_results_with_thresholds.get(site_no)
+                            if thr_exp and not thr_exp.get("error") and thr_exp.get("b17c"):
+                                thr_skew_tables_exp = compute_skew_tables(
+                                    thr_exp, selected_skew_labels
+                                )
+                                for lbl, tbl in thr_skew_tables_exp.items():
+                                    lbl_clean = lbl.lower().replace(" ", "_")
+                                    csv_buf = io.StringIO()
+                                    format_quantile_df(tbl).to_csv(csv_buf, index=False)
+                                    zf.writestr(
+                                        f"{site_no}/freq_table_w_thresholds_{lbl_clean}.csv",
+                                        csv_buf.getvalue(),
+                                    )
+                                # LP3 parameters for threshold run
+                                csv_buf = io.StringIO()
+                                format_parameters_df(thr_exp["parameters"]).to_csv(
+                                    csv_buf, index=False
+                                )
+                                zf.writestr(
+                                    f"{site_no}/lp3_parameters_with_thresholds.csv",
+                                    csv_buf.getvalue(),
+                                )
 
             # Multi-gage FFA comparison CSV
             if enable_ffa and len(selected_gages) > 1:

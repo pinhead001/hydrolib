@@ -7,7 +7,7 @@ Wraps hydrolib Bulletin17C analysis with display-friendly formatting.
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -16,6 +16,9 @@ from hydrolib.bulletin17c import Bulletin17C
 from hydrolib.core import kfactor_array
 
 logger = logging.getLogger(__name__)
+
+#: Nationwide B17C default generalized skew (England et al. 2019).
+_B17C_DEFAULT_SKEW = -0.302
 
 DISPLAY_RETURN_INTERVALS = [1.5, 2, 5, 10, 25, 50, 100, 200, 500]
 DISPLAY_AEP = [1 / ri for ri in DISPLAY_RETURN_INTERVALS]
@@ -27,6 +30,7 @@ def run_ffa(
     water_years: np.ndarray,
     regional_skew: float = -0.302,
     regional_skew_se: float = 0.55,
+    perception_thresholds: Optional[List[dict]] = None,
 ) -> dict:
     """Run Bulletin 17C flood frequency analysis.
 
@@ -40,6 +44,12 @@ def run_ffa(
         Regional skew coefficient.
     regional_skew_se : float
         Regional skew standard error.
+    perception_thresholds : list of dict, optional
+        Each dict has keys ``start_year``, ``end_year``, ``threshold_cfs``.
+        Converts to the ``Dict[Tuple[int,int], float]`` format expected by
+        :class:`~hydrolib.bulletin17c.Bulletin17C` and passed to EMA so that
+        years in each period without a recorded peak are treated as
+        left-censored observations (peak < threshold).
 
     Returns
     -------
@@ -56,18 +66,31 @@ def run_ffa(
     }
 
     try:
+        # Convert list of threshold dicts → Dict[Tuple[int,int], float]
+        pt_dict: Optional[Dict[Tuple[int, int], float]] = None
+        if perception_thresholds:
+            pt_dict = {
+                (int(t["start_year"]), int(t["end_year"])): float(t["threshold_cfs"])
+                for t in perception_thresholds
+                if float(t.get("threshold_cfs", 0)) > 0
+            } or None
+
         b17c = Bulletin17C(
             peak_flows=peak_flows,
             water_years=water_years,
             regional_skew=regional_skew,
             regional_skew_mse=regional_skew_se**2,
+            perception_thresholds=pt_dict,
         )
 
         b17c.run_analysis(method="ema")
         method = "ema"
         converged = bool(b17c.results.ema_converged)
 
-        if not converged:
+        # Only fall back to MOM when no perception thresholds are in play — MOM has no
+        # mechanism to incorporate censored intervals, so we keep the (non-converged)
+        # EMA result when thresholds extend the record.
+        if not converged and not pt_dict:
             logger.warning("EMA did not converge, falling back to MOM")
             b17c.run_analysis(method="mom")
             method = "mom"
@@ -170,6 +193,9 @@ def format_quantile_df(quantile_df: pd.DataFrame) -> pd.DataFrame:
 #: Canonical skew option labels in display order.
 SKEW_OPTIONS: List[str] = ["Station Skew", "Weighted Skew", "Regional Skew"]
 
+#: Re-export so streamlit_app can import it without reaching into internals.
+B17C_DEFAULT_SKEW: float = _B17C_DEFAULT_SKEW
+
 
 def _skew_values_from_result(ffa_result: dict) -> Dict[str, Optional[float]]:
     """Return the three skew values stored in an ffa_result dict."""
@@ -255,6 +281,7 @@ def build_station_summary_df(
     primary_skew_label: str = "Weighted Skew",
     latitude: Optional[float] = None,
     longitude: Optional[float] = None,
+    map_skew_source: str = "B17C 2019 (Nationwide)",
 ) -> pd.DataFrame:
     """Build a PeakFQ-style station summary table for display.
 
@@ -313,7 +340,7 @@ def build_station_summary_df(
             "Record Length": [n_sys],
             "Skew Option": [skew_option],
             "Use Map Skew": [use_map_skew],
-            "Map Skew Source": ["B17C 2019"],
+            "Map Skew Source": [map_skew_source],
             "Regional Skew": [f"{regional_skew:.3f}"],
             "Reg Skew Std Err": [f"{regional_skew_se:.3f}"],
             "Mean Sqr Err": [f"{mse:.4f}"],
