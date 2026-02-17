@@ -109,14 +109,13 @@ class TestBigSandyNativeSystematic:
 
 
 class TestBigSandyWithHistorical:
-    """Test Big Sandy with historical data (native EMA may not converge).
+    """Test Big Sandy with historical data — native EMA now converges.
 
-    These tests document the known limitation that the native EMA
-    implementation struggles with historical/censored intervals.
+    The analytical truncated-moment approach (matching the Fortran mP3
+    routine) resolves the overflow that previously caused NaN divergence.
     """
 
-    def test_native_ema_with_historical_runs(self) -> None:
-        """Native EMA with historical data completes (may not converge)."""
+    def _run_native_historical(self) -> Bulletin17C:
         peak_flows = np.array(list(SYSTEMATIC_PEAKS.values()))
         water_years = np.array(list(SYSTEMATIC_PEAKS.keys()))
         historical = [(year, q) for year, q in HISTORICAL_PEAKS.items()]
@@ -129,8 +128,27 @@ class TestBigSandyWithHistorical:
             historical_peaks=historical,
         )
         b17c.run_analysis(method="ema")
-        # Analysis completes without exception (convergence not guaranteed)
-        assert b17c.results is not None
+        return b17c
+
+    def test_native_ema_with_historical_converges(self) -> None:
+        """Native EMA with historical data converges to finite parameters."""
+        b17c = self._run_native_historical()
+        r = b17c.results
+        assert r is not None
+        assert r.ema_converged is True
+        assert np.isfinite(r.mean_log)
+        assert np.isfinite(r.std_log)
+        assert r.std_log > 0
+
+    def test_native_historical_quantiles_reasonable(self) -> None:
+        """Historical EMA produces reasonable quantile estimates."""
+        b17c = self._run_native_historical()
+        quantiles = b17c.compute_quantiles()
+        assert len(quantiles) > 0
+        row_01 = quantiles[quantiles["aep"] == 0.01]
+        if not row_01.empty:
+            q_01 = row_01["flow_cfs"].iloc[0]
+            assert 5000 < q_01 < 200000, f"1% AEP flow {q_01} out of reasonable range"
 
 
 @requires_peakfqsa

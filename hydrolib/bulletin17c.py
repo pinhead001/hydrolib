@@ -15,8 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import stats
-from scipy.integrate import quad
-from scipy.special import gammaln, ndtri
+from scipy.special import gammainc, gammaincc, gammaln, ndtri
 
 from .core import (
     AnalysisMethod,
@@ -456,10 +455,78 @@ class ExpectedMomentsAlgorithm(FloodFrequencyAnalysis):
         self._intervals = sorted(intervals, key=lambda x: x.year)
         return self._intervals
 
+    @staticmethod
+    def _truncated_gamma_moment(alpha: float, lower: float, upper: float, k: int) -> float:
+        """Compute E[X^k] for a standardized Gamma(alpha,1) truncated to [lower, upper].
+
+        Uses the identity E[X^k | lower<X<upper] = Gamma(alpha+k)/Gamma(alpha)
+        * [P(alpha+k, upper) - P(alpha+k, lower)] / [P(alpha, upper) - P(alpha, lower)]
+        where P is the regularized incomplete gamma function.
+
+        Parameters
+        ----------
+        alpha : float
+            Shape parameter of the gamma distribution.
+        lower : float
+            Lower truncation bound (>=0).
+        upper : float
+            Upper truncation bound (can be inf).
+        k : int
+            Moment order (1, 2, or 3).
+
+        Returns
+        -------
+        float
+            The k-th raw moment of the truncated gamma.
+        """
+        # Regularized incomplete gamma: gammainc(a, x) = P(a, x)
+        if np.isinf(upper):
+            p_num = gammaincc(alpha + k, lower) if lower > 0 else 1.0
+            p_den = gammaincc(alpha, lower) if lower > 0 else 1.0
+        else:
+            p_num = gammainc(alpha + k, upper) - (gammainc(alpha + k, lower) if lower > 0 else 0.0)
+            p_den = gammainc(alpha, upper) - (gammainc(alpha, lower) if lower > 0 else 0.0)
+
+        if p_den < 1e-30:
+            return 0.0
+
+        # ADJ = Gamma(alpha+k)/Gamma(alpha) = alpha*(alpha+1)*...*(alpha+k-1)
+        adj = 1.0
+        for j in range(k):
+            adj *= alpha + j
+
+        return adj * p_num / p_den
+
+    @staticmethod
+    def _truncated_normal_moments(zl: float, zu: float) -> Tuple[float, float, float]:
+        """Compute E[Z^k | zl<Z<zu] for k=1,2,3 where Z ~ N(0,1).
+
+        Uses the recurrence: E[Z^k] = (k-1)*E[Z^{k-2}] - (zu^{k-1}*phi(zu) - zl^{k-1}*phi(zl))/(Phi(zu)-Phi(zl))
+        """
+        phi_u = stats.norm.pdf(zu)
+        phi_l = stats.norm.pdf(zl)
+        cdf_u = stats.norm.cdf(zu)
+        cdf_l = stats.norm.cdf(zl)
+        dp = cdf_u - cdf_l
+        if dp < 1e-30:
+            mid = (zl + zu) / 2.0
+            return mid, mid**2, mid**3
+
+        ez1 = -(phi_u - phi_l) / dp
+        ez2 = 1.0 + (-(zu * phi_u - zl * phi_l) / dp)
+        ez3 = 2.0 * ez1 + (-(zu**2 * phi_u - zl**2 * phi_l) / dp)
+
+        return ez1, ez2, ez3
+
     def _compute_ema_moments(
         self, mean_log: float, std_log: float, skew: float
     ) -> Tuple[float, float, float]:
-        """Compute expected moments given current parameter estimates."""
+        """Compute expected moments given current parameter estimates.
+
+        Uses analytical truncated distribution moments following the Fortran
+        mP3 approach: incomplete gamma moments for |skew| > ~0.001, and
+        truncated normal (Wilson-Hilferty) for near-zero skew.
+        """
         sum_x = 0.0
         sum_x2 = 0.0
         sum_x3 = 0.0
@@ -472,38 +539,95 @@ class ExpectedMomentsAlgorithm(FloodFrequencyAnalysis):
                 sum_x3 += x**3
             else:
                 lower = interval.lower if interval.lower > 0 else 1e-10
-                upper = interval.upper if np.isfinite(interval.upper) else 1e10
+                upper = interval.upper if np.isfinite(interval.upper) else np.inf
 
-                p_lower = log_pearson3_cdf(lower, mean_log, std_log, skew)
-                p_upper = log_pearson3_cdf(upper, mean_log, std_log, skew)
-                p_interval = p_upper - p_lower
+                log_lower = np.log10(lower)
+                log_upper = np.log10(upper) if np.isfinite(upper) else np.inf
 
-                if p_interval < 1e-10:
-                    x = (np.log10(lower) + np.log10(upper)) / 2
-                    sum_x += x
-                    sum_x2 += x**2
-                    sum_x3 += x**3
+                if abs(skew) < 0.001:
+                    # Near-zero skew: use truncated normal moments
+                    zl = (log_lower - mean_log) / std_log if std_log > 0 else -20.0
+                    zu = (
+                        (log_upper - mean_log) / std_log
+                        if std_log > 0 and np.isfinite(log_upper)
+                        else 20.0
+                    )
+                    zl = np.clip(zl, -20.0, 20.0)
+                    zu = np.clip(zu, -20.0, 20.0)
+
+                    ez1, ez2, ez3 = self._truncated_normal_moments(zl, zu)
+                    # Transform back: x = mean + std*z
+                    ex = mean_log + std_log * ez1
+                    ex2 = mean_log**2 + 2 * mean_log * std_log * ez1 + std_log**2 * ez2
+                    ex3 = (
+                        mean_log**3
+                        + 3 * mean_log**2 * std_log * ez1
+                        + 3 * mean_log * std_log**2 * ez2
+                        + std_log**3 * ez3
+                    )
                 else:
-                    log_lower = np.log10(lower)
-                    log_upper = np.log10(upper)
+                    # Convert LP3 moments (mean, variance, skew) to gamma params
+                    # m = (mu, sigma^2, gamma) -> (tau, alpha, beta)
+                    alpha = 4.0 / skew**2
+                    beta = std_log * abs(skew) / 2.0
+                    if skew < 0:
+                        beta = -beta
+                    tau = mean_log - alpha * beta
 
-                    def pdf(log_q):
-                        return log_pearson3_pdf(log_q, mean_log, std_log, skew)
+                    # Standardize bounds for Gamma(alpha,1)
+                    if beta > 0:
+                        s_lower = max(0.0, (log_lower - tau) / beta)
+                        s_upper = (log_upper - tau) / beta if np.isfinite(log_upper) else np.inf
+                    else:
+                        # Negative beta: flip and work with |beta|
+                        abs_beta = -beta
+                        s_lower = (
+                            max(0.0, (tau - log_upper) / abs_beta)
+                            if np.isfinite(log_upper)
+                            else 0.0
+                        )
+                        s_upper = (tau - log_lower) / abs_beta
 
-                    try:
-                        ex, _ = quad(lambda x: x * pdf(x), log_lower, log_upper)
-                        ex /= p_interval
-                        ex2, _ = quad(lambda x: x**2 * pdf(x), log_lower, log_upper)
-                        ex2 /= p_interval
-                        ex3, _ = quad(lambda x: x**3 * pdf(x), log_lower, log_upper)
-                        ex3 /= p_interval
-                    except:
-                        x = (log_lower + log_upper) / 2
-                        ex, ex2, ex3 = x, x**2, x**3
+                    if s_upper <= s_lower:
+                        # Interval outside distribution support
+                        mid = (
+                            log_lower + (log_upper if np.isfinite(log_upper) else log_lower)
+                        ) / 2.0
+                        sum_x += mid
+                        sum_x2 += mid**2
+                        sum_x3 += mid**3
+                        continue
 
-                    sum_x += ex
-                    sum_x2 += ex2
-                    sum_x3 += ex3
+                    # Compute truncated gamma moments E[Y^k] for Y~Gamma(alpha,1)
+                    gy1 = self._truncated_gamma_moment(alpha, s_lower, s_upper, 1)
+                    gy2 = self._truncated_gamma_moment(alpha, s_lower, s_upper, 2)
+                    gy3 = self._truncated_gamma_moment(alpha, s_lower, s_upper, 3)
+
+                    # Transform back: x = tau + beta*Y (positive skew)
+                    # or x = tau - |beta|*Y (negative skew)
+                    if beta > 0:
+                        ex = tau + beta * gy1
+                        ex2 = tau**2 + 2 * tau * beta * gy1 + beta**2 * gy2
+                        ex3 = (
+                            tau**3
+                            + 3 * tau**2 * beta * gy1
+                            + 3 * tau * beta**2 * gy2
+                            + beta**3 * gy3
+                        )
+                    else:
+                        abs_beta = -beta
+                        ex = tau - abs_beta * gy1
+                        ex2 = tau**2 - 2 * tau * abs_beta * gy1 + abs_beta**2 * gy2
+                        ex3 = (
+                            tau**3
+                            - 3 * tau**2 * abs_beta * gy1
+                            + 3 * tau * abs_beta**2 * gy2
+                            - abs_beta**3 * gy3
+                        )
+
+                sum_x += ex
+                sum_x2 += ex2
+                sum_x3 += ex3
 
         return sum_x, sum_x2, sum_x3
 
