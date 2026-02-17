@@ -57,9 +57,7 @@ class B17CEngine:
         """Skew coefficient."""
         return self.params[2] if self.params else None
 
-    def fit(
-        self, records: Sequence[PeakRecord]
-    ) -> Tuple[float, float, float]:
+    def fit(self, records: Sequence[PeakRecord]) -> Tuple[float, float, float]:
         """
         Fit LP3 distribution to peak flow records.
 
