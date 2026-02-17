@@ -5,6 +5,7 @@ hydrolib.freq_plot - Frequency curve plotting for Streamlit display.
 from __future__ import annotations
 
 import logging
+import math
 from typing import TYPE_CHECKING, Optional, Tuple
 
 import matplotlib.pyplot as plt
@@ -15,6 +16,11 @@ if TYPE_CHECKING:
     from .bulletin17c import Bulletin17C
 
 logger = logging.getLogger(__name__)
+
+_COLOR = "steelblue"
+_FONT_SIZE = 12
+_ANNOT_FONT_SIZE = 9
+_BOX_PADDING = 0.03
 
 
 def plot_frequency_curve_streamlit(
@@ -49,8 +55,7 @@ def plot_frequency_curve_streamlit(
     def aep_to_x(p: float) -> float:
         return norm.ppf(1 - p)
 
-    fig, ax = plt.subplots(figsize=figsize, facecolor="white")
-    ax.set_facecolor("white")
+    fig, ax = plt.subplots(figsize=figsize)
 
     # --- Observed peaks (Weibull plotting positions) ---
     peak_flows = b17c._peak_flows  # noqa: SLF001
@@ -62,11 +67,11 @@ def plot_frequency_curve_streamlit(
     ax.scatter(
         x_obs,
         sorted_flows,
-        c="blue",
+        c=_COLOR,
         s=40,
         zorder=5,
         label="Observed Annual Peaks",
-        edgecolors="darkblue",
+        edgecolors="navy",
         linewidth=0.5,
     )
 
@@ -78,7 +83,7 @@ def plot_frequency_curve_streamlit(
     ax.plot(
         x_curve,
         quantiles_df["flow_cfs"].values,
-        "b-",
+        color=_COLOR,
         linewidth=2,
         label="LP3 Fitted Curve",
         zorder=4,
@@ -95,11 +100,11 @@ def plot_frequency_curve_streamlit(
         cl["lower_5pct"],
         cl["upper_5pct"],
         alpha=0.2,
-        color="blue",
+        color=_COLOR,
         label="90% Confidence Interval",
     )
-    ax.plot(x_cl, cl["lower_5pct"], "b--", linewidth=0.8, alpha=0.6)
-    ax.plot(x_cl, cl["upper_5pct"], "b--", linewidth=0.8, alpha=0.6)
+    ax.plot(x_cl, cl["lower_5pct"], color=_COLOR, linestyle="--", linewidth=0.8, alpha=0.6)
+    ax.plot(x_cl, cl["upper_5pct"], color=_COLOR, linestyle="--", linewidth=0.8, alpha=0.6)
 
     # --- Low outlier threshold ---
     if r.low_outlier_threshold > 0 and r.n_low_outliers > 0:
@@ -113,8 +118,18 @@ def plot_frequency_curve_streamlit(
 
     # --- Axes ---
     ax.set_yscale("log")
-    ax.set_ylabel("Peak Discharge (cfs)", fontsize=11)
-    ax.set_xlabel("Annual Exceedance Probability", fontsize=11)
+    ax.set_ylabel("Discharge (cfs)", fontsize=_FONT_SIZE)
+    ax.set_xlabel("Annual Exceedance Probability", fontsize=_FONT_SIZE)
+
+    # Y-axis ticks: powers of 10, comma-formatted (matches hydrograph plots)
+    min_flow = sorted_flows[-1] if len(sorted_flows) else 1.0
+    max_flow = sorted_flows[0] if len(sorted_flows) else 1e6
+    if min_flow > 0:
+        min_exp = math.floor(math.log10(min_flow))
+        max_exp = math.ceil(math.log10(max_flow))
+        yticks = [10**i for i in range(min_exp, max_exp + 1)]
+        ax.set_yticks(yticks)
+        ax.set_yticklabels([f"{int(t):,}" for t in yticks])
 
     # X-axis probability ticks
     prob_ticks = [0.999, 0.99, 0.95, 0.90, 0.80, 0.50, 0.20, 0.10, 0.04, 0.02, 0.01, 0.005, 0.002]
@@ -123,11 +138,8 @@ def plot_frequency_curve_streamlit(
     tick_labels = []
     for p in prob_ticks:
         pct = p * 100
-        if pct >= 1:
-            tick_labels.append(f"{pct:g}%")
-        else:
-            tick_labels.append(f"{pct:.1f}%")
-    ax.set_xticklabels(tick_labels, fontsize=9, rotation=45, ha="right")
+        tick_labels.append(f"{pct:g}%" if pct >= 1 else f"{pct:.1f}%")
+    ax.set_xticklabels(tick_labels, fontsize=_ANNOT_FONT_SIZE, rotation=45, ha="right")
     ax.set_xlim(aep_to_x(0.999), aep_to_x(0.002))
 
     # --- Secondary axis: return periods ---
@@ -136,38 +148,40 @@ def plot_frequency_curve_streamlit(
     rp_ticks = [1.5, 2, 5, 10, 25, 50, 100, 200, 500]
     rp_x = [aep_to_x(1 / rp) for rp in rp_ticks]
     ax2.set_xticks(rp_x)
-    ax2.set_xticklabels([str(int(rp)) if rp == int(rp) else str(rp) for rp in rp_ticks], fontsize=9)
-    ax2.set_xlabel("Return Period (years)", fontsize=11)
+    ax2.set_xticklabels(
+        [str(int(rp)) if rp == int(rp) else str(rp) for rp in rp_ticks],
+        fontsize=_ANNOT_FONT_SIZE,
+    )
+    ax2.set_xlabel("Return Period (years)", fontsize=_FONT_SIZE)
 
     # --- Title ---
     if site_name and site_no:
-        title = f"{site_name}\nUSGS {site_no}"
+        title = f"Flood Frequency Curve\nUSGS {site_no} - {site_name}"
     elif site_no:
-        title = f"USGS {site_no}"
+        title = f"Flood Frequency Curve - USGS {site_no}"
     else:
         title = "Flood Frequency Curve (Bulletin 17C)"
-    ax.set_title(title, fontsize=12, fontweight="bold", pad=35)
+    ax.set_title(title, fontsize=_FONT_SIZE, fontweight="bold", pad=35)
 
-    # --- LP3 parameters text box ---
+    # --- LP3 parameters annotation (top-left, matches hydrograph style) ---
     stats_text = (
-        f"LP3 Parameters: "
-        f"\u03bc={r.mean_log:.3f}  "
-        f"\u03c3={r.std_log:.3f}  "
-        f"\u03b3={r.skew_used:.3f}"
+        f"n = {n}\n"
+        f"\u03bc(log Q) = {r.mean_log:.4f}\n"
+        f"\u03c3(log Q) = {r.std_log:.4f}\n"
+        f"\u03b3 (weighted) = {r.skew_used:.3f}"
     )
-    ax.text(
-        0.02,
-        0.02,
+    ax.annotate(
         stats_text,
-        transform=ax.transAxes,
-        fontsize=9,
-        va="bottom",
+        xy=(_BOX_PADDING, 1 - _BOX_PADDING),
+        xycoords="axes fraction",
+        fontsize=_ANNOT_FONT_SIZE,
         ha="left",
+        va="top",
         family="monospace",
-        bbox=dict(boxstyle="round", facecolor="white", alpha=0.9, edgecolor="gray"),
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", edgecolor="lightgray", alpha=1.0),
     )
 
-    ax.legend(loc="upper right", fontsize=9)
+    ax.legend(loc="lower left", fontsize=_ANNOT_FONT_SIZE)
     ax.grid(True, which="both", alpha=0.3)
     fig.tight_layout()
 
