@@ -6,21 +6,58 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import norm
+
+from .core import kfactor_array
 
 if TYPE_CHECKING:
     from .bulletin17c import Bulletin17C
 
 logger = logging.getLogger(__name__)
 
-_COLOR = "steelblue"
 _FONT_SIZE = 12
 _ANNOT_FONT_SIZE = 9
 _BOX_PADDING = 0.03
+
+# Per-skew-option display style: color, linestyle
+_SKEW_STYLE: Dict[str, Tuple[str, str]] = {
+    "Station Skew": ("steelblue", "-"),
+    "Weighted Skew": ("k", "-"),
+    "Regional Skew": ("darkorange", "-"),
+}
+# Fallback palette when label not in _SKEW_STYLE
+_FALLBACK_COLORS = ["steelblue", "k", "darkorange", "forestgreen"]
+
+
+def _lp3_quantiles(
+    mean_log: float,
+    std_log: float,
+    skew: float,
+    aep: np.ndarray,
+) -> np.ndarray:
+    """Return LP3 flow estimates (cfs) for the given AEP array."""
+    K = kfactor_array(skew, aep)
+    return 10.0 ** (mean_log + K * std_log)
+
+
+def _lp3_ci(
+    mean_log: float,
+    std_log: float,
+    skew: float,
+    n: int,
+    aep: np.ndarray,
+    z_alpha: float = 1.6449,  # 90% two-sided (norm.ppf(0.95))
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Return (lower, upper) 90% confidence bounds for LP3 quantiles."""
+    K = kfactor_array(skew, aep)
+    log_Q = mean_log + K * std_log
+    var_factor = 1 / n + K**2 * (1 + 0.75 * skew**2) / (2 * (n - 1))
+    se_log = std_log * np.sqrt(var_factor)
+    return 10.0 ** (log_Q - z_alpha * se_log), 10.0 ** (log_Q + z_alpha * se_log)
 
 
 def plot_frequency_curve_streamlit(
@@ -28,19 +65,26 @@ def plot_frequency_curve_streamlit(
     site_name: Optional[str] = None,
     site_no: Optional[str] = None,
     figsize: Tuple[int, int] = (10, 6),
+    skew_curves: Optional[Dict[str, float]] = None,
 ) -> plt.Figure:
     """Plot a Bulletin 17C frequency curve suitable for Streamlit display.
 
     Parameters
     ----------
     b17c : Bulletin17C
-        A Bulletin17C instance (analysis will be run if not already done).
+        A fitted Bulletin17C instance.
     site_name : str, optional
         Station name for the title.
     site_no : str, optional
         USGS station number for the title.
     figsize : tuple
         Figure size in inches.
+    skew_curves : dict[str, float], optional
+        Mapping of ``{label: skew_value}`` for each LP3 curve to draw.
+        When None or a single entry, one black curve (like the summary
+        hydrograph median line) is drawn.  With multiple entries each curve
+        gets a distinct color with its own 90% CI band.
+        Example: ``{"Station Skew": -0.15, "Weighted Skew": -0.22}``.
 
     Returns
     -------
@@ -51,6 +95,15 @@ def plot_frequency_curve_streamlit(
         b17c.run_analysis()
 
     r = b17c.results
+    mean_log = r.mean_log
+    std_log = r.std_log
+    n_sys = r.n_systematic or r.n_peaks
+
+    # Default: single curve using the skew already selected by EMA/MOM
+    if not skew_curves:
+        skew_curves = {"LP3 Fitted Curve": r.skew_used}
+
+    multi = len(skew_curves) > 1
 
     def aep_to_x(p: float) -> float:
         return norm.ppf(1 - p)
@@ -60,51 +113,50 @@ def plot_frequency_curve_streamlit(
     # --- Observed peaks (Weibull plotting positions) ---
     peak_flows = b17c._peak_flows  # noqa: SLF001
     sorted_flows = np.sort(peak_flows)[::-1]
-    n = len(sorted_flows)
-    weibull_aep = np.arange(1, n + 1) / (n + 1)
+    n_obs = len(sorted_flows)
+    weibull_aep = np.arange(1, n_obs + 1) / (n_obs + 1)
     x_obs = [aep_to_x(p) for p in weibull_aep]
 
     ax.scatter(
         x_obs,
         sorted_flows,
-        c=_COLOR,
-        s=40,
+        c="steelblue",
+        s=20,
+        alpha=0.5,
         zorder=5,
         label="Observed Annual Peaks",
         edgecolors="navy",
         linewidth=0.5,
     )
 
-    # --- Fitted LP3 curve at fine spacing ---
-    aep_fine = np.linspace(0.001, 0.999, 200)
-    quantiles_df = b17c.compute_quantiles(aep_fine)
-    x_curve = [aep_to_x(p) for p in aep_fine]
-
-    ax.plot(
-        x_curve,
-        quantiles_df["flow_cfs"].values,
-        color=_COLOR,
-        linewidth=2,
-        label="LP3 Fitted Curve",
-        zorder=4,
-    )
-
-    # --- 90% confidence interval ---
+    # --- LP3 curves (one per skew option) ---
+    aep_fine = np.linspace(0.001, 0.999, 300)
     aep_ci = np.array(
         [0.999, 0.995, 0.99, 0.95, 0.90, 0.80, 0.50, 0.20, 0.10, 0.04, 0.02, 0.01, 0.005, 0.002]
     )
-    cl = b17c.compute_confidence_limits(aep_ci, confidence=0.90)
-    x_cl = [aep_to_x(p) for p in cl["aep"]]
-    ax.fill_between(
-        x_cl,
-        cl["lower_5pct"],
-        cl["upper_5pct"],
-        alpha=0.2,
-        color=_COLOR,
-        label="90% Confidence Interval",
-    )
-    ax.plot(x_cl, cl["lower_5pct"], color=_COLOR, linestyle="--", linewidth=0.8, alpha=0.6)
-    ax.plot(x_cl, cl["upper_5pct"], color=_COLOR, linestyle="--", linewidth=0.8, alpha=0.6)
+    x_curve = [aep_to_x(p) for p in aep_fine]
+    x_cl = [aep_to_x(p) for p in aep_ci]
+
+    fallback_idx = 0
+    for label, skew_val in skew_curves.items():
+        if label in _SKEW_STYLE:
+            color, ls = _SKEW_STYLE[label]
+        else:
+            color = _FALLBACK_COLORS[fallback_idx % len(_FALLBACK_COLORS)]
+            ls = "-"
+            fallback_idx += 1
+
+        # Single curve → black "k-" linewidth=1 (matches summary hydrograph median)
+        if not multi:
+            color, ls = "k", "-"
+
+        Q_curve = _lp3_quantiles(mean_log, std_log, skew_val, aep_fine)
+        ax.plot(x_curve, Q_curve, color=color, linestyle=ls, linewidth=1, label=label, zorder=4)
+
+        lower, upper = _lp3_ci(mean_log, std_log, skew_val, n_sys, aep_ci)
+        ax.fill_between(x_cl, lower, upper, alpha=0.12, color=color)
+        ax.plot(x_cl, lower, color=color, linestyle="--", linewidth=0.7, alpha=0.55)
+        ax.plot(x_cl, upper, color=color, linestyle="--", linewidth=0.7, alpha=0.55)
 
     # --- Low outlier threshold ---
     if r.low_outlier_threshold > 0 and r.n_low_outliers > 0:
@@ -122,8 +174,8 @@ def plot_frequency_curve_streamlit(
     ax.set_xlabel("Annual Exceedance Probability", fontsize=_FONT_SIZE)
 
     # Y-axis ticks: powers of 10, comma-formatted (matches hydrograph plots)
-    min_flow = sorted_flows[-1] if len(sorted_flows) else 1.0
-    max_flow = sorted_flows[0] if len(sorted_flows) else 1e6
+    min_flow = sorted_flows[-1] if n_obs else 1.0
+    max_flow = sorted_flows[0] if n_obs else 1e6
     if min_flow > 0:
         min_exp = math.floor(math.log10(min_flow))
         max_exp = math.ceil(math.log10(max_flow))
@@ -164,11 +216,15 @@ def plot_frequency_curve_streamlit(
     ax.set_title(title, fontsize=_FONT_SIZE, fontweight="bold", pad=35)
 
     # --- LP3 parameters annotation (top-left, matches hydrograph style) ---
+    skew_lines = "\n".join(
+        f"\u03b3 {lbl.replace(' Skew', '').lower():<8} = {val:.3f}"
+        for lbl, val in skew_curves.items()
+    )
     stats_text = (
-        f"n = {n}\n"
-        f"\u03bc(log Q) = {r.mean_log:.4f}\n"
-        f"\u03c3(log Q) = {r.std_log:.4f}\n"
-        f"\u03b3 (weighted) = {r.skew_used:.3f}"
+        f"n = {n_obs}\n"
+        f"\u03bc(log Q) = {mean_log:.4f}\n"
+        f"\u03c3(log Q) = {std_log:.4f}\n"
+        f"{skew_lines}"
     )
     ax.annotate(
         stats_text,

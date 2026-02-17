@@ -7,12 +7,13 @@ Wraps hydrolib Bulletin17C analysis with display-friendly formatting.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
 from hydrolib.bulletin17c import Bulletin17C
+from hydrolib.core import kfactor_array
 
 logger = logging.getLogger(__name__)
 
@@ -160,3 +161,112 @@ def format_quantile_df(quantile_df: pd.DataFrame) -> pd.DataFrame:
         df[col] = df[col].apply(lambda x: f"{int(round(x)):,}")
 
     return df
+
+
+# ---------------------------------------------------------------------------
+# Skew-variant helpers
+# ---------------------------------------------------------------------------
+
+#: Canonical skew option labels in display order.
+SKEW_OPTIONS: List[str] = ["Station Skew", "Weighted Skew", "Regional Skew"]
+
+
+def _skew_values_from_result(ffa_result: dict) -> Dict[str, Optional[float]]:
+    """Return the three skew values stored in an ffa_result dict."""
+    p = ffa_result.get("parameters", {})
+    return {
+        "Station Skew": p.get("skew_station"),
+        "Weighted Skew": p.get("skew_weighted"),
+        "Regional Skew": p.get("regional_skew"),
+    }
+
+
+def compute_skew_tables(
+    ffa_result: dict,
+    selected_labels: List[str],
+) -> Dict[str, pd.DataFrame]:
+    """Compute a raw quantile+CI table for each selected skew option.
+
+    Uses the LP3 moments (mean_log, std_log) already fitted by EMA/MOM and
+    substitutes the requested skew value to produce separate frequency tables
+    without re-running the full analysis.
+
+    Parameters
+    ----------
+    ffa_result : dict
+        Output from :func:`run_ffa`.
+    selected_labels : list[str]
+        Subset of ``["Station Skew", "Weighted Skew", "Regional Skew"]``.
+
+    Returns
+    -------
+    dict[str, pd.DataFrame]
+        Maps label → DataFrame with columns:
+        ``Return Interval (yr)``, ``AEP (%)``,
+        ``Flow (cfs)``, ``Lower 90% CI``, ``Upper 90% CI``.
+        Returns an empty dict if ffa_result has an error.
+    """
+    if ffa_result.get("error") or ffa_result.get("b17c") is None:
+        return {}
+
+    r = ffa_result["b17c"].results
+    mean_log = r.mean_log
+    std_log = r.std_log
+    n = r.n_systematic or r.n_peaks
+
+    skew_map = _skew_values_from_result(ffa_result)
+    aep = np.array(DISPLAY_AEP)
+    z_alpha = 1.6449  # norm.ppf(0.95): two-sided 90% CI
+
+    tables: Dict[str, pd.DataFrame] = {}
+    for label in selected_labels:
+        skew_val = skew_map.get(label)
+        if skew_val is None:
+            continue
+
+        K = kfactor_array(skew_val, aep)
+        log_Q = mean_log + K * std_log
+        Q = 10.0**log_Q
+
+        var_factor = 1 / n + K**2 * (1 + 0.75 * skew_val**2) / (2 * (n - 1))
+        se_log = std_log * np.sqrt(var_factor)
+        lower = 10.0 ** (log_Q - z_alpha * se_log)
+        upper = 10.0 ** (log_Q + z_alpha * se_log)
+
+        tables[label] = pd.DataFrame(
+            {
+                "Return Interval (yr)": DISPLAY_RETURN_INTERVALS,
+                "AEP (%)": aep,
+                "Flow (cfs)": Q,
+                "Lower 90% CI": lower,
+                "Upper 90% CI": upper,
+            }
+        )
+
+    return tables
+
+
+def build_skew_curves_dict(
+    ffa_result: dict,
+    selected_labels: List[str],
+) -> Dict[str, float]:
+    """Return ``{label: skew_value}`` for the selected skew options.
+
+    Intended for passing directly to
+    :func:`hydrolib.freq_plot.plot_frequency_curve_streamlit` as the
+    ``skew_curves`` argument.
+
+    Parameters
+    ----------
+    ffa_result : dict
+        Output from :func:`run_ffa`.
+    selected_labels : list[str]
+        Skew labels the user has checked.
+
+    Returns
+    -------
+    dict[str, float]
+        Empty dict (fall back to default) when no valid labels are found.
+    """
+    skew_map = _skew_values_from_result(ffa_result)
+    return {lbl: skew_map[lbl] for lbl in selected_labels if skew_map.get(lbl) is not None}

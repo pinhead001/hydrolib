@@ -21,7 +21,14 @@ matplotlib.use("Agg")  # Use non-interactive backend
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.ffa_export import export_comparison_csv, export_ffa_to_zip
-from app.ffa_runner import format_parameters_df, format_quantile_df, run_ffa
+from app.ffa_runner import (
+    SKEW_OPTIONS,
+    build_skew_curves_dict,
+    compute_skew_tables,
+    format_parameters_df,
+    format_quantile_df,
+    run_ffa,
+)
 
 # Import hydrolib
 from hydrolib import Hydrograph
@@ -85,10 +92,17 @@ if enable_ffa:
         help="Standard error of the regional skew estimate. Nationwide default: 0.55",
     )
     show_freq_curve = st.sidebar.checkbox("Frequency Curve", value=True)
+    st.sidebar.markdown("**Skew Options**")
+    skew_station_on = st.sidebar.checkbox("Station Skew", value=False)
+    skew_weighted_on = st.sidebar.checkbox("Weighted Skew", value=True)
+    skew_regional_on = st.sidebar.checkbox("Regional Skew", value=False)
 else:
     regional_skew = -0.302
     regional_skew_se = 0.55
     show_freq_curve = False
+    skew_station_on = False
+    skew_weighted_on = True
+    skew_regional_on = False
 
 # Download button
 download_data = st.sidebar.button("Download Data", type="primary")
@@ -358,10 +372,21 @@ if st.session_state.gage_data:
         if show_freq_curve and site_no in st.session_state.ffa_results:
             ffa_result = st.session_state.ffa_results[site_no]
             if not ffa_result.get("error") and ffa_result.get("b17c"):
+                selected_skew_labels = [
+                    lbl
+                    for lbl, on in [
+                        ("Station Skew", skew_station_on),
+                        ("Weighted Skew", skew_weighted_on),
+                        ("Regional Skew", skew_regional_on),
+                    ]
+                    if on
+                ]
+                skew_curves = build_skew_curves_dict(ffa_result, selected_skew_labels) or None
                 freq_fig = plot_frequency_curve_streamlit(
                     ffa_result["b17c"],
                     site_name=gage_info.get("name", ""),
                     site_no=site_no,
+                    skew_curves=skew_curves,
                 )
                 st.pyplot(freq_fig)
 
@@ -369,6 +394,17 @@ if st.session_state.gage_data:
         if enable_ffa and site_no in st.session_state.ffa_results:
             ffa_result = st.session_state.ffa_results[site_no]
             if not ffa_result.get("error"):
+                selected_skew_labels = [
+                    lbl
+                    for lbl, on in [
+                        ("Station Skew", skew_station_on),
+                        ("Weighted Skew", skew_weighted_on),
+                        ("Regional Skew", skew_regional_on),
+                    ]
+                    if on
+                ]
+                skew_tables = compute_skew_tables(ffa_result, selected_skew_labels)
+
                 with st.expander("Flood Frequency Results", expanded=False):
                     # Convergence badge
                     if ffa_result.get("converged"):
@@ -382,11 +418,21 @@ if st.session_state.gage_data:
                         use_container_width=True,
                     )
 
-                    st.markdown("**Frequency Table** (Return intervals 1.5-500 years)")
-                    st.dataframe(
-                        format_quantile_df(ffa_result["quantile_df"]),
-                        use_container_width=True,
-                    )
+                    if skew_tables:
+                        for label, tbl in skew_tables.items():
+                            st.markdown(
+                                f"**Frequency Table — {label}** (Return intervals 1.5–500 years)"
+                            )
+                            st.dataframe(
+                                format_quantile_df(tbl),
+                                use_container_width=True,
+                            )
+                    else:
+                        st.markdown("**Frequency Table** (Return intervals 1.5–500 years)")
+                        st.dataframe(
+                            format_quantile_df(ffa_result["quantile_df"]),
+                            use_container_width=True,
+                        )
 
         st.divider()
 
@@ -476,12 +522,25 @@ if st.session_state.gage_data:
                 if enable_ffa and site_no in st.session_state.ffa_results:
                     ffa_result = st.session_state.ffa_results[site_no]
                     if not ffa_result.get("error"):
+                        selected_skew_labels = [
+                            lbl
+                            for lbl, on in [
+                                ("Station Skew", skew_station_on),
+                                ("Weighted Skew", skew_weighted_on),
+                                ("Regional Skew", skew_regional_on),
+                            ]
+                            if on
+                        ]
+                        skew_curves_export = (
+                            build_skew_curves_dict(ffa_result, selected_skew_labels) or None
+                        )
                         freq_fig_for_export = None
                         if show_freq_curve and ffa_result.get("b17c"):
                             freq_fig_for_export = plot_frequency_curve_streamlit(
                                 ffa_result["b17c"],
                                 site_name=gage_info.get("name", ""),
                                 site_no=site_no,
+                                skew_curves=skew_curves_export,
                             )
                         export_ffa_to_zip(zf, site_no, ffa_result, freq_fig_for_export)
 
