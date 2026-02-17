@@ -24,6 +24,7 @@ from app.ffa_export import export_comparison_csv, export_ffa_to_zip
 from app.ffa_runner import (
     SKEW_OPTIONS,
     build_skew_curves_dict,
+    build_station_summary_df,
     compute_skew_tables,
     format_parameters_df,
     format_quantile_df,
@@ -32,7 +33,7 @@ from app.ffa_runner import (
 
 # Import hydrolib
 from hydrolib import Hydrograph
-from hydrolib.freq_plot import plot_frequency_curve_streamlit
+from hydrolib.freq_plot import plot_frequency_curve_streamlit, plot_peak_flows_with_thresholds
 from hydrolib.usgs import USGSgage
 
 st.set_page_config(
@@ -236,6 +237,8 @@ if download_data and gage_list:
                 "por_start": por_start_date,
                 "por_end": por_end_date,
                 "records": len(daily_data),
+                "latitude": gage.latitude,
+                "longitude": gage.longitude,
             }
 
             # Store full daily data
@@ -406,6 +409,25 @@ if st.session_state.gage_data:
                 skew_tables = compute_skew_tables(ffa_result, selected_skew_labels)
 
                 with st.expander("Flood Frequency Results", expanded=False):
+                    # Station summary table (PeakFQ-style)
+                    peak_df_site = st.session_state.peak_data.get(site_no)
+                    if peak_df_site is not None and not ffa_result.get("error") and ffa_result.get("b17c"):
+                        st.markdown("**Station Summary**")
+                        primary_label = (
+                            selected_skew_labels[0] if selected_skew_labels else "Weighted Skew"
+                        )
+                        summary_df = build_station_summary_df(
+                            site_no=site_no,
+                            peak_df=peak_df_site,
+                            ffa_result=ffa_result,
+                            regional_skew=regional_skew,
+                            regional_skew_se=regional_skew_se,
+                            primary_skew_label=primary_label,
+                            latitude=gage_info.get("latitude"),
+                            longitude=gage_info.get("longitude"),
+                        )
+                        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
                     # Convergence badge
                     if ffa_result.get("converged"):
                         st.success("EMA Converged")
@@ -433,6 +455,74 @@ if st.session_state.gage_data:
                             format_quantile_df(ffa_result["quantile_df"]),
                             use_container_width=True,
                         )
+
+        # Peak flow record & perception thresholds expander
+        if enable_ffa and st.session_state.peak_data.get(site_no) is not None:
+            peak_df_site = st.session_state.peak_data[site_no]
+            with st.expander("Peak Flow Record & Perception Thresholds", expanded=False):
+                st.markdown(
+                    "Define time periods when only peaks **above** a certain level were observed "
+                    "and recorded (e.g., historical periods before systematic gauging). "
+                    "Enter one row per threshold period."
+                )
+
+                thr_df_init = pd.DataFrame(
+                    {
+                        "Start Year": pd.Series([], dtype="float64"),
+                        "End Year": pd.Series([], dtype="float64"),
+                        "Threshold (cfs)": pd.Series([], dtype="float64"),
+                    }
+                )
+
+                edited_thr = st.data_editor(
+                    thr_df_init,
+                    num_rows="dynamic",
+                    key=f"thr_editor_{site_no}",
+                    column_config={
+                        "Start Year": st.column_config.NumberColumn(
+                            min_value=1700,
+                            max_value=2100,
+                            step=1,
+                            format="%d",
+                        ),
+                        "End Year": st.column_config.NumberColumn(
+                            min_value=1700,
+                            max_value=2100,
+                            step=1,
+                            format="%d",
+                        ),
+                        "Threshold (cfs)": st.column_config.NumberColumn(
+                            min_value=0,
+                            format="%.0f",
+                        ),
+                    },
+                    use_container_width=True,
+                )
+
+                # Parse valid threshold rows
+                thresholds = []
+                for _, row in edited_thr.dropna(how="all").iterrows():
+                    try:
+                        t_cfs = float(row["Threshold (cfs)"])
+                        if t_cfs > 0:
+                            thresholds.append(
+                                {
+                                    "start_year": int(row["Start Year"]),
+                                    "end_year": int(row["End Year"]),
+                                    "threshold_cfs": t_cfs,
+                                }
+                            )
+                    except (ValueError, TypeError, KeyError):
+                        pass
+
+                peak_fig = plot_peak_flows_with_thresholds(
+                    peak_df_site,
+                    site_name=gage_info.get("name", ""),
+                    site_no=site_no,
+                    thresholds=thresholds or None,
+                )
+                st.pyplot(peak_fig)
+                plt.close(peak_fig)
 
         st.divider()
 

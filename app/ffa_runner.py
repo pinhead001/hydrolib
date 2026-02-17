@@ -246,6 +246,86 @@ def compute_skew_tables(
     return tables
 
 
+def build_station_summary_df(
+    site_no: str,
+    peak_df: pd.DataFrame,
+    ffa_result: dict,
+    regional_skew: float,
+    regional_skew_se: float,
+    primary_skew_label: str = "Weighted Skew",
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
+) -> pd.DataFrame:
+    """Build a PeakFQ-style station summary table for display.
+
+    Parameters
+    ----------
+    site_no : str
+        USGS site number.
+    peak_df : pd.DataFrame
+        Annual peak flow data (must have ``water_year`` column).
+    ffa_result : dict
+        Output from :func:`run_ffa`.
+    regional_skew : float
+        Regional skew input value.
+    regional_skew_se : float
+        Regional skew standard error.
+    primary_skew_label : str
+        The skew option currently selected (determines "Skew Option" field).
+    latitude : float, optional
+        Station latitude (decimal degrees).
+    longitude : float, optional
+        Station longitude (decimal degrees, negative = West).
+
+    Returns
+    -------
+    pd.DataFrame
+        Single-row DataFrame styled after PeakFQ station summary output.
+    """
+    b17c = ffa_result.get("b17c")
+    r = b17c.results if b17c is not None else None
+
+    start_year = int(peak_df["water_year"].min()) if not peak_df.empty else "N/A"
+    end_year = int(peak_df["water_year"].max()) if not peak_df.empty else "N/A"
+    n_sys = (r.n_systematic if r is not None else None) or len(peak_df)
+
+    skew_option_map = {
+        "Station Skew": "Station",
+        "Weighted Skew": "Weighted",
+        "Regional Skew": "Regional",
+    }
+    skew_option = skew_option_map.get(primary_skew_label, "Weighted")
+    use_map_skew = "No" if primary_skew_label == "Station Skew" else "Yes"
+
+    pilf_threshold = (
+        f"{r.low_outlier_threshold:,.0f}" if r is not None and r.low_outlier_threshold > 0 else "0"
+    )
+
+    lat_str = f"{latitude:.5f}°N" if latitude is not None else "N/A"
+    lon_str = f"{abs(longitude):.5f}°W" if longitude is not None else "N/A"
+    mse = round(regional_skew_se**2, 4)
+
+    return pd.DataFrame(
+        {
+            "Station ID": [site_no],
+            "Start Year": [start_year],
+            "End Year": [end_year],
+            "Record Length": [n_sys],
+            "Skew Option": [skew_option],
+            "Use Map Skew": [use_map_skew],
+            "Map Skew Source": ["B17C 2019"],
+            "Regional Skew": [f"{regional_skew:.3f}"],
+            "Reg Skew Std Err": [f"{regional_skew_se:.3f}"],
+            "Mean Sqr Err": [f"{mse:.4f}"],
+            "PILF (LO) Test": ["MGBT"],
+            "PILF (LO) Threshold": [pilf_threshold],
+            "Urban/Reg Peaks": ["No"],
+            "Latitude": [lat_str],
+            "Longitude": [lon_str],
+        }
+    )
+
+
 def build_skew_curves_dict(
     ffa_result: dict,
     selected_labels: List[str],

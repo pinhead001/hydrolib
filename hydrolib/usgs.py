@@ -151,6 +151,8 @@ class USGSgage:
         self._peak_data: Optional[pd.DataFrame] = None
         self._daily_por_start: Optional[str] = None
         self._daily_por_end: Optional[str] = None
+        self._latitude: Optional[float] = None
+        self._longitude: Optional[float] = None
 
     @property
     def site_no(self) -> str:
@@ -196,6 +198,14 @@ class USGSgage:
     def daily_por_end(self) -> Optional[str]:
         return self._daily_por_end
 
+    @property
+    def latitude(self) -> Optional[float]:
+        return self._latitude
+
+    @property
+    def longitude(self) -> Optional[float]:
+        return self._longitude
+
     @cached_property
     def period_of_record(self) -> Optional[Tuple[int, int]]:
         if self._peak_data is not None:
@@ -239,8 +249,8 @@ class USGSgage:
         """
         self._last_api_error: Optional[str] = None
 
-        # Call 1: Get site metadata (name, drainage area) with siteOutput=expanded
-        if self._site_name is None or self._drainage_area is None:
+        # Call 1: Get site metadata (name, drainage area, lat/lon) with siteOutput=expanded
+        if self._site_name is None or self._drainage_area is None or self._latitude is None:
             params_site = {
                 "format": "rdb",
                 "sites": self._site_no,
@@ -267,6 +277,18 @@ class USGSgage:
                     ):
                         try:
                             self._drainage_area = float(df["drain_area_va"].iloc[0])
+                        except (ValueError, TypeError):
+                            pass
+
+                    if self._latitude is None and "dec_lat_va" in df.columns and len(df) > 0:
+                        try:
+                            self._latitude = float(df["dec_lat_va"].iloc[0])
+                        except (ValueError, TypeError):
+                            pass
+
+                    if self._longitude is None and "dec_long_va" in df.columns and len(df) > 0:
+                        try:
+                            self._longitude = float(df["dec_long_va"].iloc[0])
                         except (ValueError, TypeError):
                             pass
             except Exception as e:

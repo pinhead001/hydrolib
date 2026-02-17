@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from scipy.stats import norm
 
 from .core import kfactor_array
@@ -239,6 +240,114 @@ def plot_frequency_curve_streamlit(
 
     ax.legend(loc="lower left", fontsize=_ANNOT_FONT_SIZE)
     ax.grid(True, which="both", alpha=0.3)
+    fig.tight_layout()
+
+    return fig
+
+
+_THRESHOLD_COLORS = ["darkorange", "forestgreen", "purple", "crimson", "teal"]
+
+
+def plot_peak_flows_with_thresholds(
+    peak_df: pd.DataFrame,
+    site_name: Optional[str] = None,
+    site_no: Optional[str] = None,
+    thresholds: Optional[List[dict]] = None,
+    figsize: Tuple[int, int] = (12, 5),
+) -> plt.Figure:
+    """Plot annual peak flows as a bar chart with optional perception threshold lines.
+
+    Parameters
+    ----------
+    peak_df : pd.DataFrame
+        DataFrame with columns ``water_year`` and ``peak_flow_cfs``.
+    site_name : str, optional
+        Station name for the title.
+    site_no : str, optional
+        USGS station number for the title.
+    thresholds : list of dict, optional
+        Each dict has keys ``start_year`` (int), ``end_year`` (int),
+        ``threshold_cfs`` (float).  Drawn as horizontal dashed lines spanning
+        the specified year range with a light shaded region.
+    figsize : tuple
+        Figure size in inches.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    fig, ax = plt.subplots(figsize=figsize)
+
+    years = peak_df["water_year"].values.astype(int)
+    flows = peak_df["peak_flow_cfs"].values.astype(float)
+
+    # Bar chart of annual peaks
+    ax.bar(years, flows, color="steelblue", alpha=0.75, width=0.8, label="Annual Peak Flow")
+
+    # Perception threshold lines
+    if thresholds:
+        for i, thr in enumerate(thresholds):
+            start = int(thr.get("start_year", years.min()))
+            end = int(thr.get("end_year", years.max()))
+            flow_thr = float(thr.get("threshold_cfs", 0))
+            if flow_thr <= 0:
+                continue
+            color = _THRESHOLD_COLORS[i % len(_THRESHOLD_COLORS)]
+            label = f"Threshold {i + 1}: {flow_thr:,.0f} cfs ({start}–{end})"
+            ax.hlines(
+                flow_thr,
+                start - 0.5,
+                end + 0.5,
+                colors=color,
+                linestyles="--",
+                linewidth=2,
+                label=label,
+                zorder=5,
+            )
+            ax.axvspan(start - 0.5, end + 0.5, alpha=0.07, color=color)
+
+    ax.set_yscale("log")
+    ax.set_xlabel("Water Year", fontsize=_FONT_SIZE)
+    ax.set_ylabel("Peak Flow (cfs)", fontsize=_FONT_SIZE)
+
+    # Y-axis: powers of 10, comma-formatted (matches hydrograph style)
+    valid_flows = flows[flows > 0]
+    if len(valid_flows) > 0:
+        min_exp = math.floor(math.log10(valid_flows.min()))
+        max_exp = math.ceil(math.log10(valid_flows.max()))
+        yticks = [10**i for i in range(min_exp, max_exp + 1)]
+        ax.set_yticks(yticks)
+        ax.set_yticklabels([f"{int(t):,}" for t in yticks])
+
+    # Title
+    if site_name and site_no:
+        title = f"Annual Peak Flows\nUSGS {site_no} - {site_name}"
+    elif site_no:
+        title = f"Annual Peak Flows - USGS {site_no}"
+    else:
+        title = "Annual Peak Flows"
+    ax.set_title(title, fontsize=_FONT_SIZE, fontweight="bold")
+
+    # Record summary annotation (top-left, matches hydrograph style)
+    n_years = len(years)
+    year_range = f"{years.min()}–{years.max()}" if n_years > 0 else ""
+    stats_text = f"n = {n_years} years\n{year_range}"
+    ax.annotate(
+        stats_text,
+        xy=(_BOX_PADDING, 1 - _BOX_PADDING),
+        xycoords="axes fraction",
+        fontsize=_ANNOT_FONT_SIZE,
+        ha="left",
+        va="top",
+        family="monospace",
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", edgecolor="lightgray", alpha=1.0),
+    )
+
+    has_valid_thresholds = thresholds and any(t.get("threshold_cfs", 0) > 0 for t in thresholds)
+    if has_valid_thresholds:
+        ax.legend(loc="upper right", fontsize=_ANNOT_FONT_SIZE)
+
+    ax.grid(True, which="both", alpha=0.3, axis="y")
     fig.tight_layout()
 
     return fig
