@@ -156,10 +156,55 @@ def _create_big_sandy_benchmark() -> Benchmark:
 BENCHMARKS: dict[str, Benchmark] = {}
 
 
+def _create_fortran_respec_benchmark() -> Benchmark:
+    """Create benchmark from Respec Fortran test fixture (moms_p3/p3est_ema)."""
+    from tests.peakfqsa.fixtures.fortran_respec import (
+        MOMS_P3_EXPECTED,
+        P3EST_EMA_EXPECTED,
+        TRUTH_MOMS_P3_EXPECTED,
+    )
+
+    return Benchmark(
+        name="fortran_respec",
+        description=(
+            "Respec EMA Fortran tests — moms_p3, p3est_ema, var_mom, qP3 "
+            "from peakfqr test-fortran.R"
+        ),
+        expected_parameters={
+            "moms_p3_orig_mean": MOMS_P3_EXPECTED["orig"][0],
+            "moms_p3_orig_var": MOMS_P3_EXPECTED["orig"][1],
+            "moms_p3_orig_skew": MOMS_P3_EXPECTED["orig"][2],
+            "p3est_ema_orig_mean": P3EST_EMA_EXPECTED["orig"][0],
+            "p3est_ema_orig_var": P3EST_EMA_EXPECTED["orig"][1],
+            "p3est_ema_orig_skew": P3EST_EMA_EXPECTED["orig"][2],
+            "truth_mean": TRUTH_MOMS_P3_EXPECTED[0],
+            "truth_var": TRUTH_MOMS_P3_EXPECTED[1],
+            "truth_skew": TRUTH_MOMS_P3_EXPECTED[2],
+        },
+        tolerance_pct=0.01,
+    )
+
+
+def _create_skew_weighting_benchmark() -> Benchmark:
+    """Create benchmark from Halloween skew weighting tests."""
+    return Benchmark(
+        name="skew_weighting",
+        description=(
+            "Halloween determinant ratio skew weighting — "
+            "detrat() vs Greg Schwarz SAS output (312 cases)"
+        ),
+        tolerance_pct=0.1,
+    )
+
+
 def register_benchmarks() -> None:
     """Populate the BENCHMARKS registry with all available benchmarks."""
     if "big_sandy" not in BENCHMARKS:
         BENCHMARKS["big_sandy"] = _create_big_sandy_benchmark()
+    if "fortran_respec" not in BENCHMARKS:
+        BENCHMARKS["fortran_respec"] = _create_fortran_respec_benchmark()
+    if "skew_weighting" not in BENCHMARKS:
+        BENCHMARKS["skew_weighting"] = _create_skew_weighting_benchmark()
 
 
 def run_all_benchmarks() -> dict[str, ComparisonResult]:
