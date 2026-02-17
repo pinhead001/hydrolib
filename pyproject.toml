@@ -46,3 +46,6 @@ known_first_party = ["hydrolib"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v"
+markers = [
+    "requires_peakfqsa: marks tests that require the PeakfqSA binary (deselect with '-m \"not requires_peakfqsa\"')",
+]
