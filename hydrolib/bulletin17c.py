@@ -654,19 +654,20 @@ class ExpectedMomentsAlgorithm(FloodFrequencyAnalysis):
             hist_end = self._ema_params.historical_end or (sys_start - 1)
             hist_threshold = self._ema_params.historical_threshold
 
-            periods.append({
-                "Start Year": hist_start,
-                "End Year": hist_end,
-                "Low Threshold (cfs)": hist_threshold,
-                "High Threshold (cfs)": np.inf,
-                "Comments": "Historical Record"
-            })
+            periods.append(
+                {
+                    "Start Year": hist_start,
+                    "End Year": hist_end,
+                    "Low Threshold (cfs)": hist_threshold,
+                    "High Threshold (cfs)": np.inf,
+                    "Comments": "Historical Record",
+                }
+            )
 
         # Systematic record - check for gaps and different thresholds
         # Group consecutive years with same perception thresholds
         systematic_intervals = [
-            i for i in self._intervals
-            if i.is_systematic and sys_start <= i.year <= sys_end
+            i for i in self._intervals if i.is_systematic and sys_start <= i.year <= sys_end
         ]
 
         if systematic_intervals:
@@ -675,39 +676,44 @@ class ExpectedMomentsAlgorithm(FloodFrequencyAnalysis):
 
             # For systematic record, perception is typically 0 to infinity
             # unless there are low outlier thresholds
-            periods.append({
-                "Start Year": sys_start,
-                "End Year": sys_end,
-                "Low Threshold (cfs)": 0.0,
-                "High Threshold (cfs)": np.inf,
-                "Comments": "Systematic Record"
-            })
+            periods.append(
+                {
+                    "Start Year": sys_start,
+                    "End Year": sys_end,
+                    "Low Threshold (cfs)": 0.0,
+                    "High Threshold (cfs)": np.inf,
+                    "Comments": "Systematic Record",
+                }
+            )
 
         # Check for explicitly defined perception thresholds
         for (start, end), threshold in self._perception_thresholds.items():
-            periods.append({
-                "Start Year": start,
-                "End Year": end,
-                "Low Threshold (cfs)": threshold,
-                "High Threshold (cfs)": np.inf,
-                "Comments": "User-Defined Threshold"
-            })
+            periods.append(
+                {
+                    "Start Year": start,
+                    "End Year": end,
+                    "Low Threshold (cfs)": threshold,
+                    "High Threshold (cfs)": np.inf,
+                    "Comments": "User-Defined Threshold",
+                }
+            )
 
         # Add low outlier censoring info if applicable
         if low_outlier_thresh > 0 and self._results and self._results.n_low_outliers > 0:
             # Find years with low outliers
             low_outlier_years = [
-                i.year for i in self._intervals
-                if i.is_censored and i.upper <= low_outlier_thresh
+                i.year for i in self._intervals if i.is_censored and i.upper <= low_outlier_thresh
             ]
             if low_outlier_years:
-                periods.append({
-                    "Start Year": min(low_outlier_years),
-                    "End Year": max(low_outlier_years),
-                    "Low Threshold (cfs)": low_outlier_thresh,
-                    "High Threshold (cfs)": np.inf,
-                    "Comments": f"Low Outlier Censoring ({len(low_outlier_years)} years)"
-                })
+                periods.append(
+                    {
+                        "Start Year": min(low_outlier_years),
+                        "End Year": max(low_outlier_years),
+                        "Low Threshold (cfs)": low_outlier_thresh,
+                        "High Threshold (cfs)": np.inf,
+                        "Comments": f"Low Outlier Censoring ({len(low_outlier_years)} years)",
+                    }
+                )
 
         # Sort periods by start year
         periods.sort(key=lambda x: x["Start Year"])
@@ -911,3 +917,88 @@ class Bulletin17C:
             )
 
         return self._analyzer.get_perception_thresholds_table()
+
+    def to_comparison_dict(self) -> dict:
+        """Convert native results to a dict compatible with FrequencyComparator.
+
+        Returns
+        -------
+        dict
+            Keys: 'parameters', 'quantiles', 'confidence_intervals'.
+
+        Raises
+        ------
+        ValueError
+            If analysis has not been run yet.
+        """
+        if self._results is None:
+            raise ValueError("Run analysis before converting to comparison dict")
+
+        r = self._results
+
+        parameters = {
+            "mean_log": r.mean_log,
+            "std_log": r.std_log,
+            "skew_at_site": r.skew_station,
+        }
+        if r.skew_weighted is not None:
+            parameters["skew_weighted"] = r.skew_weighted
+
+        # Extract quantiles from DataFrame
+        quantiles: dict[float, float] = {}
+        if r.quantiles is not None and not r.quantiles.empty:
+            for _, row in r.quantiles.iterrows():
+                quantiles[float(row["aep"])] = float(row["flow_cfs"])
+
+        # Extract confidence intervals from DataFrame
+        confidence_intervals: dict[float, tuple[float, float]] = {}
+        if r.confidence_limits is not None and not r.confidence_limits.empty:
+            for _, row in r.confidence_limits.iterrows():
+                confidence_intervals[float(row["aep"])] = (
+                    float(row["lower_5pct"]),
+                    float(row["upper_5pct"]),
+                )
+
+        return {
+            "parameters": parameters,
+            "quantiles": quantiles,
+            "confidence_intervals": confidence_intervals,
+        }
+
+    def validate(
+        self,
+        reference: "PeakfqSAResult",
+        tolerance_pct: float = 1.0,
+        parameter_tolerance_pct: float = 0.5,
+        ci_tolerance_pct: float = 2.0,
+    ) -> "ComparisonResult":
+        """Validate native results against a PeakfqSA reference.
+
+        Parameters
+        ----------
+        reference : PeakfqSAResult
+            Reference result from PeakfqSA.
+        tolerance_pct : float
+            Tolerance for quantile comparisons.
+        parameter_tolerance_pct : float
+            Tolerance for LP3 parameter comparisons.
+        ci_tolerance_pct : float
+            Tolerance for confidence interval comparisons.
+
+        Returns
+        -------
+        ComparisonResult
+            Detailed comparison result.
+        """
+        from hydrolib.validation.comparisons import FrequencyComparator
+
+        if self._results is None:
+            self.run_analysis()
+
+        native_dict = self.to_comparison_dict()
+        comparator = FrequencyComparator(
+            tolerance_pct=tolerance_pct,
+            parameter_tolerance_pct=parameter_tolerance_pct,
+            ci_tolerance_pct=ci_tolerance_pct,
+        )
+        return comparator.compare(native_dict, reference)
