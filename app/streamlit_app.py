@@ -717,7 +717,15 @@ if st.session_state.gage_data:
 
         # ── Frequency curve plot ──────────────────────────────────────────
         if show_freq_curve and site_no in st.session_state.ffa_results:
-            ffa_result = st.session_state.ffa_results[site_no]
+            _base_result = st.session_state.ffa_results[site_no]
+            _thr_result = st.session_state.ffa_results_with_thresholds.get(site_no)
+            _thr_valid = bool(
+                _thr_result and not _thr_result.get("error") and _thr_result.get("b17c")
+            )
+
+            # Use the threshold-adjusted result as the primary curve when available
+            ffa_result = _thr_result if _thr_valid else _base_result
+
             if not ffa_result.get("error") and ffa_result.get("b17c"):
                 selected_skew_labels = [
                     lbl
@@ -730,19 +738,18 @@ if st.session_state.gage_data:
                 ]
                 skew_curves = build_skew_curves_dict(ffa_result, selected_skew_labels) or None
 
+                # When threshold result is primary, show baseline as comparison overlay
                 extra_curves = None
-                if show_threshold_curve:
-                    thr_res = st.session_state.ffa_results_with_thresholds.get(site_no)
-                    if thr_res and not thr_res.get("error") and thr_res.get("b17c"):
-                        r_thr = thr_res["b17c"].results
-                        extra_curves = {
-                            "With Perception Thresholds": (
-                                r_thr.mean_log,
-                                r_thr.std_log,
-                                r_thr.skew_used,
-                                r_thr.n_systematic or r_thr.n_peaks,
-                            )
-                        }
+                if show_threshold_curve and _thr_valid:
+                    r_base = _base_result["b17c"].results
+                    extra_curves = {
+                        "Baseline (No Thresholds)": (
+                            r_base.mean_log,
+                            r_base.std_log,
+                            r_base.skew_used,
+                            r_base.n_systematic or r_base.n_peaks,
+                        )
+                    }
 
                 freq_fig = plot_frequency_curve_streamlit(
                     ffa_result["b17c"],
