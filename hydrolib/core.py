@@ -147,6 +147,8 @@ class FrequencyResults:
     confidence_limits: pd.DataFrame = field(default_factory=pd.DataFrame)
     ema_iterations: Optional[int] = None
     ema_converged: Optional[bool] = None
+    n_zeros: int = 0
+    pilf_flows: List[float] = field(default_factory=list)
 
 
 # =============================================================================

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -177,6 +178,20 @@ if enable_ffa:
         value=False,
         help="Overlay the EMA curve re-run with user-defined perception thresholds.",
     )
+    st.sidebar.markdown("**PILF (Low Outlier) Override**")
+    lo_override_input = st.sidebar.number_input(
+        "PILF Threshold Override (cfs)",
+        value=0.0,
+        min_value=0.0,
+        step=100.0,
+        format="%.0f",
+        help=(
+            "Leave at 0 to use the automatic Multiple Grubbs-Beck Test (MGBT) result. "
+            "Enter a positive value to override the MGBT and censor all peaks below "
+            "this threshold."
+        ),
+    )
+    low_outlier_override = float(lo_override_input) if lo_override_input > 0 else None
 else:
     regional_skew = -0.302
     regional_skew_se = 0.55
@@ -186,6 +201,7 @@ else:
     skew_weighted_on = True
     skew_regional_on = False
     show_threshold_curve = False
+    low_outlier_override = None
 
 # Download button
 download_data = st.sidebar.button("Download Data", type="primary")
@@ -326,6 +342,7 @@ if download_data and gage_list:
                             water_years=peak_df["water_year"].values.astype(int),
                             regional_skew=regional_skew,
                             regional_skew_se=regional_skew_se,
+                            low_outlier_threshold_override=low_outlier_override,
                         )
                         st.session_state.ffa_results[site_no] = ffa_result
                     if ffa_result.get("error"):
@@ -459,6 +476,7 @@ if st.session_state.gage_data:
                             water_years=_filtered["water_year"].values.astype(int),
                             regional_skew=regional_skew,
                             regional_skew_se=regional_skew_se,
+                            low_outlier_threshold_override=low_outlier_override,
                         )
                     st.session_state.ffa_results[site_no] = _recalc
                     st.session_state.ffa_year_range[site_no] = (int(ffa_start_yr), int(ffa_end_yr))
@@ -485,10 +503,11 @@ if st.session_state.gage_data:
         if enable_ffa and _peak_raw is not None:
             with st.expander("Peak Flow Record & Perception Thresholds", expanded=False):
                 st.markdown(
-                    "Define time periods when only peaks **above** a certain level were observed "
-                    "and recorded (e.g., historical periods before systematic gauging). "
-                    "Each period adds left-censored intervals to EMA — click **Apply** to "
-                    "re-run the analysis and overlay the result on the frequency curve."
+                    "Define time periods when only peaks within a certain flow range were "
+                    "observed and recorded. Enter **Lower (cfs)** = minimum detectable flow "
+                    "(use 0 for no lower limit) and **Upper (cfs)** = maximum detectable flow "
+                    "(enter **inf** for no upper limit / historical threshold). "
+                    "Each period adds censored intervals to EMA — click **Apply** to re-run."
                 )
 
                 # Show note when a custom FFA year range is active
@@ -501,13 +520,99 @@ if st.session_state.gage_data:
                         "The threshold analysis will also use the filtered year range."
                     )
 
-                thr_df_init = pd.DataFrame(
-                    {
-                        "Start Year": pd.Series([], dtype="float64"),
-                        "End Year": pd.Series([], dtype="float64"),
-                        "Threshold (cfs)": pd.Series([], dtype="float64"),
-                    }
+                # ── Auto-populate helper ─────────────────────────────────
+                def _build_auto_thr_rows(peak_df: pd.DataFrame, ffa_res: dict) -> list[dict]:
+                    """Build auto-populate rows: systematic, gaps, and PILFs."""
+                    if peak_df.empty:
+                        return []
+                    rows = []
+                    wy = sorted(peak_df["water_year"].astype(int).tolist())
+                    min_wy, max_wy = wy[0], wy[-1]
+                    flows = peak_df.set_index("water_year")["peak_flow_cfs"]
+
+                    # 1. Systematic record (full range, 0/inf)
+                    rows.append({
+                        "Start Year": min_wy,
+                        "End Year": max_wy,
+                        "Lower (cfs)": "0",
+                        "Upper (cfs)": "inf",
+                        "Note": "Systematic record",
+                    })
+
+                    # 2. Gaps in the systematic record
+                    wy_set = set(wy)
+                    in_gap = False
+                    gap_start = None
+                    for y in range(min_wy, max_wy + 1):
+                        if y not in wy_set:
+                            if not in_gap:
+                                in_gap = True
+                                gap_start = y
+                                # Max flow just before gap
+                                pre_gap = [f for yr, f in flows.items() if yr < y]
+                                pre_max = max(pre_gap) if pre_gap else 0
+                        else:
+                            if in_gap:
+                                rows.append({
+                                    "Start Year": gap_start,
+                                    "End Year": y - 1,
+                                    "Lower (cfs)": "0",
+                                    "Upper (cfs)": f"{int(round(pre_max))}",
+                                    "Note": "Gap in record",
+                                })
+                                in_gap = False
+
+                    # 3. PILF years (below MGBT/override threshold)
+                    if ffa_res and not ffa_res.get("error") and ffa_res.get("b17c"):
+                        r_res = ffa_res["b17c"].results
+                        lo_thr = r_res.low_outlier_threshold
+                        if lo_thr > 0:
+                            thr_str = f"{int(round(lo_thr))}"
+                            for yr in peak_df.loc[
+                                peak_df["peak_flow_cfs"] < lo_thr, "water_year"
+                            ].astype(int):
+                                rows.append({
+                                    "Start Year": int(yr),
+                                    "End Year": int(yr),
+                                    "Lower (cfs)": "0",
+                                    "Upper (cfs)": thr_str,
+                                    "Note": "PILF year",
+                                })
+                    return rows
+
+                # Auto-populate button
+                _cur_ffa = st.session_state.ffa_results.get(site_no)
+                auto_populate = st.button(
+                    "Auto-populate from record",
+                    key=f"auto_thr_{site_no}",
+                    help=(
+                        "Pre-fill the table with the systematic record, gaps, "
+                        "and PILF-identified years. Review and edit before applying."
+                    ),
                 )
+                if auto_populate:
+                    st.session_state[f"thr_prepop_{site_no}"] = _build_auto_thr_rows(
+                        peak_df_for_ffa, _cur_ffa
+                    )
+                    st.info(
+                        "Table auto-populated. **Please review the values** — especially "
+                        "the Upper threshold for gaps — before clicking Apply."
+                    )
+
+                # Build initial DataFrame for editor
+                _prepop = st.session_state.get(f"thr_prepop_{site_no}", [])
+                if _prepop:
+                    thr_df_init = pd.DataFrame(_prepop)
+                else:
+                    thr_df_init = pd.DataFrame(
+                        {
+                            "Start Year": pd.Series([], dtype="float64"),
+                            "End Year": pd.Series([], dtype="float64"),
+                            "Lower (cfs)": pd.Series([], dtype="str"),
+                            "Upper (cfs)": pd.Series([], dtype="str"),
+                            "Note": pd.Series([], dtype="str"),
+                        }
+                    )
 
                 edited_thr = st.data_editor(
                     thr_df_init,
@@ -515,42 +620,54 @@ if st.session_state.gage_data:
                     key=f"thr_editor_{site_no}",
                     column_config={
                         "Start Year": st.column_config.NumberColumn(
-                            min_value=1700,
-                            max_value=2100,
-                            step=1,
-                            format="%d",
+                            min_value=1700, max_value=2100, step=1, format="%d",
                         ),
                         "End Year": st.column_config.NumberColumn(
-                            min_value=1700,
-                            max_value=2100,
-                            step=1,
-                            format="%d",
+                            min_value=1700, max_value=2100, step=1, format="%d",
                         ),
-                        "Threshold (cfs)": st.column_config.NumberColumn(
-                            min_value=0,
-                            format="%.0f",
+                        "Lower (cfs)": st.column_config.TextColumn(
+                            help="Minimum detectable flow in cfs. Use 0 for no lower limit.",
+                        ),
+                        "Upper (cfs)": st.column_config.TextColumn(
+                            help="Maximum detectable flow in cfs. Enter 'inf' for no upper limit.",
+                        ),
+                        "Note": st.column_config.TextColumn(
+                            help="Optional description of this threshold period.",
                         ),
                     },
                     use_container_width=True,
                 )
 
-                # Parse valid threshold rows
+                # Parse valid threshold rows (supports 'inf' for upper)
                 thresholds = []
-                for _, row in edited_thr.dropna(how="all").iterrows():
+                for _, row in edited_thr.dropna(subset=["Start Year", "End Year"]).iterrows():
                     try:
-                        t_cfs = float(row["Threshold (cfs)"])
-                        if t_cfs > 0:
+                        lo_raw = str(row.get("Lower (cfs)", "0") or "0").strip()
+                        hi_raw = str(row.get("Upper (cfs)", "inf") or "inf").strip()
+                        lo = 0.0 if lo_raw in ("", "0") else float(lo_raw)
+                        hi = float("inf") if hi_raw.lower() in ("inf", "infinity", "") else float(hi_raw)
+                        if lo > 0 or not np.isinf(hi):
                             thresholds.append(
                                 {
                                     "start_year": int(row["Start Year"]),
                                     "end_year": int(row["End Year"]),
-                                    "threshold_cfs": t_cfs,
+                                    "lower_cfs": lo,
+                                    "upper_cfs": hi,
+                                    # Legacy key for ffa_runner (uses upper as the threshold)
+                                    "threshold_cfs": hi if not np.isinf(hi) else 0.0,
                                 }
                             )
                     except (ValueError, TypeError, KeyError):
                         pass
 
                 st.session_state.perception_thresholds[site_no] = thresholds
+
+                # MGBT threshold for bar chart annotation
+                _mgbt_thr = None
+                if _cur_ffa and not _cur_ffa.get("error") and _cur_ffa.get("b17c"):
+                    _lo = _cur_ffa["b17c"].results.low_outlier_threshold
+                    if _lo and _lo > 0:
+                        _mgbt_thr = _lo
 
                 # Bar chart — full record; hollow bars = years excluded from FFA
                 peak_fig = plot_peak_flows_with_thresholds(
@@ -559,6 +676,7 @@ if st.session_state.gage_data:
                     site_no=site_no,
                     thresholds=thresholds or None,
                     ffa_year_range=st.session_state.ffa_year_range.get(site_no),
+                    mgbt_threshold=_mgbt_thr,
                 )
                 st.pyplot(peak_fig)
                 plt.close(peak_fig)
@@ -580,6 +698,7 @@ if st.session_state.gage_data:
                             regional_skew=regional_skew,
                             regional_skew_se=regional_skew_se,
                             perception_thresholds=thresholds,
+                            low_outlier_threshold_override=low_outlier_override,
                         )
                         st.session_state.ffa_results_with_thresholds[site_no] = thr_run
                     st.rerun()

@@ -31,6 +31,7 @@ def run_ffa(
     regional_skew: float = -0.302,
     regional_skew_se: float = 0.55,
     perception_thresholds: Optional[List[dict]] = None,
+    low_outlier_threshold_override: Optional[float] = None,
 ) -> dict:
     """Run Bulletin 17C flood frequency analysis.
 
@@ -45,11 +46,15 @@ def run_ffa(
     regional_skew_se : float
         Regional skew standard error.
     perception_thresholds : list of dict, optional
-        Each dict has keys ``start_year``, ``end_year``, ``threshold_cfs``.
-        Converts to the ``Dict[Tuple[int,int], float]`` format expected by
+        Each dict has keys ``start_year``, ``end_year``, ``threshold_cfs``
+        (legacy) or ``lower_cfs`` / ``upper_cfs``.  Converts to the
+        ``Dict[Tuple[int,int], float]`` format expected by
         :class:`~hydrolib.bulletin17c.Bulletin17C` and passed to EMA so that
         years in each period without a recorded peak are treated as
         left-censored observations (peak < threshold).
+    low_outlier_threshold_override : float, optional
+        User-supplied PILF threshold (cfs).  When > 0, overrides the MGBT
+        result and censors all peaks below this value.
 
     Returns
     -------
@@ -75,12 +80,19 @@ def run_ffa(
                 if float(t.get("threshold_cfs", 0)) > 0
             } or None
 
+        lo_override = (
+            float(low_outlier_threshold_override)
+            if low_outlier_threshold_override and low_outlier_threshold_override > 0
+            else None
+        )
+
         b17c = Bulletin17C(
             peak_flows=peak_flows,
             water_years=water_years,
             regional_skew=regional_skew,
             regional_skew_mse=regional_skew_se**2,
             perception_thresholds=pt_dict,
+            user_low_outlier_threshold=lo_override,
         )
 
         b17c.run_analysis(method="ema")
