@@ -481,6 +481,121 @@ if st.session_state.gage_data:
         else:
             peak_df_for_ffa = None
 
+        # ── Peak flow record & perception thresholds expander ─────────────
+        if enable_ffa and _peak_raw is not None:
+            with st.expander("Peak Flow Record & Perception Thresholds", expanded=False):
+                st.markdown(
+                    "Define time periods when only peaks **above** a certain level were observed "
+                    "and recorded (e.g., historical periods before systematic gauging). "
+                    "Each period adds left-censored intervals to EMA — click **Apply** to "
+                    "re-run the analysis and overlay the result on the frequency curve."
+                )
+
+                # Show note when a custom FFA year range is active
+                _wy_active = st.session_state.ffa_year_range.get(site_no)
+                if _wy_active:
+                    st.info(
+                        f"FFA is using peaks from **{_wy_active[0]}–{_wy_active[1]}** "
+                        f"({len(peak_df_for_ffa)} peaks). "
+                        "Hollow bars show peaks excluded from the analysis. "
+                        "The threshold analysis will also use the filtered year range."
+                    )
+
+                thr_df_init = pd.DataFrame(
+                    {
+                        "Start Year": pd.Series([], dtype="float64"),
+                        "End Year": pd.Series([], dtype="float64"),
+                        "Threshold (cfs)": pd.Series([], dtype="float64"),
+                    }
+                )
+
+                edited_thr = st.data_editor(
+                    thr_df_init,
+                    num_rows="dynamic",
+                    key=f"thr_editor_{site_no}",
+                    column_config={
+                        "Start Year": st.column_config.NumberColumn(
+                            min_value=1700,
+                            max_value=2100,
+                            step=1,
+                            format="%d",
+                        ),
+                        "End Year": st.column_config.NumberColumn(
+                            min_value=1700,
+                            max_value=2100,
+                            step=1,
+                            format="%d",
+                        ),
+                        "Threshold (cfs)": st.column_config.NumberColumn(
+                            min_value=0,
+                            format="%.0f",
+                        ),
+                    },
+                    use_container_width=True,
+                )
+
+                # Parse valid threshold rows
+                thresholds = []
+                for _, row in edited_thr.dropna(how="all").iterrows():
+                    try:
+                        t_cfs = float(row["Threshold (cfs)"])
+                        if t_cfs > 0:
+                            thresholds.append(
+                                {
+                                    "start_year": int(row["Start Year"]),
+                                    "end_year": int(row["End Year"]),
+                                    "threshold_cfs": t_cfs,
+                                }
+                            )
+                    except (ValueError, TypeError, KeyError):
+                        pass
+
+                st.session_state.perception_thresholds[site_no] = thresholds
+
+                # Bar chart — full record; hollow bars = years excluded from FFA
+                peak_fig = plot_peak_flows_with_thresholds(
+                    _peak_raw,
+                    site_name=gage_info.get("name", ""),
+                    site_no=site_no,
+                    thresholds=thresholds or None,
+                    ffa_year_range=st.session_state.ffa_year_range.get(site_no),
+                )
+                st.pyplot(peak_fig)
+                plt.close(peak_fig)
+
+                # Apply button + status — FFA re-run uses filtered year range
+                col_btn, col_status = st.columns([1, 2])
+                with col_btn:
+                    apply_clicked = st.button(
+                        "Apply Thresholds to Analysis",
+                        key=f"apply_thr_{site_no}",
+                        disabled=(len(thresholds) == 0),
+                        help="Re-run EMA incorporating the threshold periods above.",
+                    )
+                if apply_clicked:
+                    with st.spinner("Re-running EMA with perception thresholds…"):
+                        thr_run = run_ffa(
+                            peak_flows=peak_df_for_ffa["peak_flow_cfs"].values,
+                            water_years=peak_df_for_ffa["water_year"].values.astype(int),
+                            regional_skew=regional_skew,
+                            regional_skew_se=regional_skew_se,
+                            perception_thresholds=thresholds,
+                        )
+                        st.session_state.ffa_results_with_thresholds[site_no] = thr_run
+                    st.rerun()
+                with col_status:
+                    thr_stored = st.session_state.ffa_results_with_thresholds.get(site_no)
+                    if thr_stored:
+                        if not thr_stored.get("error") and thr_stored.get("b17c"):
+                            r_t = thr_stored["b17c"].results
+                            st.success(
+                                f"Applied — {len(st.session_state.perception_thresholds.get(site_no, []))} "
+                                f"period(s), {r_t.n_peaks} total peaks "
+                                f"({r_t.n_systematic} sys + {r_t.n_censored} censored)"
+                            )
+                        else:
+                            st.error(f"Analysis error: {thr_stored.get('error')}")
+
         # ── Frequency curve plot ──────────────────────────────────────────
         if show_freq_curve and site_no in st.session_state.ffa_results:
             ffa_result = st.session_state.ffa_results[site_no]
@@ -611,120 +726,6 @@ if st.session_state.gage_data:
                                     format_quantile_df(thr_res["quantile_df"]),
                                     use_container_width=True,
                                 )
-
-        # ── Peak flow record & perception thresholds expander ─────────────
-        if enable_ffa and _peak_raw is not None:
-            with st.expander("Peak Flow Record & Perception Thresholds", expanded=False):
-                st.markdown(
-                    "Define time periods when only peaks **above** a certain level were observed "
-                    "and recorded (e.g., historical periods before systematic gauging). "
-                    "Each period adds left-censored intervals to EMA — click **Apply** to "
-                    "re-run the analysis and overlay the result on the frequency curve."
-                )
-
-                # Show note when a custom FFA year range is active
-                _wy_active = st.session_state.ffa_year_range.get(site_no)
-                if _wy_active:
-                    st.info(
-                        f"FFA is using peaks from **{_wy_active[0]}–{_wy_active[1]}** "
-                        f"({len(peak_df_for_ffa)} peaks). "
-                        "The chart below shows the full record for context. "
-                        "The threshold analysis will also use the filtered year range."
-                    )
-
-                thr_df_init = pd.DataFrame(
-                    {
-                        "Start Year": pd.Series([], dtype="float64"),
-                        "End Year": pd.Series([], dtype="float64"),
-                        "Threshold (cfs)": pd.Series([], dtype="float64"),
-                    }
-                )
-
-                edited_thr = st.data_editor(
-                    thr_df_init,
-                    num_rows="dynamic",
-                    key=f"thr_editor_{site_no}",
-                    column_config={
-                        "Start Year": st.column_config.NumberColumn(
-                            min_value=1700,
-                            max_value=2100,
-                            step=1,
-                            format="%d",
-                        ),
-                        "End Year": st.column_config.NumberColumn(
-                            min_value=1700,
-                            max_value=2100,
-                            step=1,
-                            format="%d",
-                        ),
-                        "Threshold (cfs)": st.column_config.NumberColumn(
-                            min_value=0,
-                            format="%.0f",
-                        ),
-                    },
-                    use_container_width=True,
-                )
-
-                # Parse valid threshold rows
-                thresholds = []
-                for _, row in edited_thr.dropna(how="all").iterrows():
-                    try:
-                        t_cfs = float(row["Threshold (cfs)"])
-                        if t_cfs > 0:
-                            thresholds.append(
-                                {
-                                    "start_year": int(row["Start Year"]),
-                                    "end_year": int(row["End Year"]),
-                                    "threshold_cfs": t_cfs,
-                                }
-                            )
-                    except (ValueError, TypeError, KeyError):
-                        pass
-
-                st.session_state.perception_thresholds[site_no] = thresholds
-
-                # Bar chart uses full peak record for context
-                peak_fig = plot_peak_flows_with_thresholds(
-                    _peak_raw,
-                    site_name=gage_info.get("name", ""),
-                    site_no=site_no,
-                    thresholds=thresholds or None,
-                )
-                st.pyplot(peak_fig)
-                plt.close(peak_fig)
-
-                # Apply button + status — FFA re-run uses filtered year range
-                col_btn, col_status = st.columns([1, 2])
-                with col_btn:
-                    apply_clicked = st.button(
-                        "Apply Thresholds to Analysis",
-                        key=f"apply_thr_{site_no}",
-                        disabled=(len(thresholds) == 0),
-                        help="Re-run EMA incorporating the threshold periods above.",
-                    )
-                if apply_clicked:
-                    with st.spinner("Re-running EMA with perception thresholds…"):
-                        thr_run = run_ffa(
-                            peak_flows=peak_df_for_ffa["peak_flow_cfs"].values,
-                            water_years=peak_df_for_ffa["water_year"].values.astype(int),
-                            regional_skew=regional_skew,
-                            regional_skew_se=regional_skew_se,
-                            perception_thresholds=thresholds,
-                        )
-                        st.session_state.ffa_results_with_thresholds[site_no] = thr_run
-                    st.rerun()
-                with col_status:
-                    thr_stored = st.session_state.ffa_results_with_thresholds.get(site_no)
-                    if thr_stored:
-                        if not thr_stored.get("error") and thr_stored.get("b17c"):
-                            r_t = thr_stored["b17c"].results
-                            st.success(
-                                f"Applied — {len(st.session_state.perception_thresholds.get(site_no, []))} "
-                                f"period(s), {r_t.n_peaks} total peaks "
-                                f"({r_t.n_systematic} sys + {r_t.n_censored} censored)"
-                            )
-                        else:
-                            st.error(f"Analysis error: {thr_stored.get('error')}")
 
         st.divider()
 

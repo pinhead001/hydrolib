@@ -280,6 +280,7 @@ def plot_peak_flows_with_thresholds(
     site_no: Optional[str] = None,
     thresholds: Optional[List[dict]] = None,
     figsize: Tuple[int, int] = (12, 5),
+    ffa_year_range: Optional[Tuple[int, int]] = None,
 ) -> plt.Figure:
     """Plot annual peak flows as a bar chart with optional perception threshold lines.
 
@@ -297,6 +298,10 @@ def plot_peak_flows_with_thresholds(
         the specified year range with a light shaded region.
     figsize : tuple
         Figure size in inches.
+    ffa_year_range : tuple of (int, int), optional
+        ``(start_year, end_year)`` of the peak-flow record used in the FFA.
+        Years outside this range are drawn as hollow outline bars so the user
+        can see which peaks were excluded from the analysis.
 
     Returns
     -------
@@ -307,8 +312,30 @@ def plot_peak_flows_with_thresholds(
     years = peak_df["water_year"].values.astype(int)
     flows = peak_df["peak_flow_cfs"].values.astype(float)
 
-    # Bar chart of annual peaks
-    ax.bar(years, flows, color="steelblue", alpha=0.75, width=0.8, label="Annual Peak Flow")
+    # Determine which years are inside the FFA analysis range
+    if ffa_year_range is not None:
+        ffa_start, ffa_end = ffa_year_range
+        in_range = (years >= ffa_start) & (years <= ffa_end)
+        has_excluded = bool((~in_range).any())
+    else:
+        in_range = np.ones(len(years), dtype=bool)
+        ffa_start = ffa_end = None
+        has_excluded = False
+
+    # Bar chart — years outside FFA range drawn as hollow outline bars
+    if has_excluded:
+        ax.bar(
+            years[in_range], flows[in_range],
+            color="steelblue", alpha=0.75, width=0.8,
+            label="Annual Peak Flow (in analysis)",
+        )
+        ax.bar(
+            years[~in_range], flows[~in_range],
+            facecolor="none", edgecolor="steelblue", linewidth=0.8, alpha=0.7, width=0.8,
+            label="Excluded from FFA",
+        )
+    else:
+        ax.bar(years, flows, color="steelblue", alpha=0.75, width=0.8, label="Annual Peak Flow")
 
     # Perception threshold lines
     if thresholds:
@@ -356,8 +383,15 @@ def plot_peak_flows_with_thresholds(
 
     # Record summary annotation (top-left, matches hydrograph style)
     n_years = len(years)
-    year_range = f"{years.min()}–{years.max()}" if n_years > 0 else ""
-    stats_text = f"n = {n_years} years\n{year_range}"
+    if has_excluded:
+        n_in = int(in_range.sum())
+        stats_text = (
+            f"n = {n_years} total peaks\n"
+            f"{n_in} in analysis ({ffa_start}–{ffa_end})"
+        )
+    else:
+        year_range = f"{years.min()}–{years.max()}" if n_years > 0 else ""
+        stats_text = f"n = {n_years} years\n{year_range}"
     ax.annotate(
         stats_text,
         xy=(_BOX_PADDING, 1 - _BOX_PADDING),
@@ -370,7 +404,7 @@ def plot_peak_flows_with_thresholds(
     )
 
     has_valid_thresholds = thresholds and any(t.get("threshold_cfs", 0) > 0 for t in thresholds)
-    if has_valid_thresholds:
+    if has_valid_thresholds or has_excluded:
         ax.legend(loc="upper right", fontsize=_ANNOT_FONT_SIZE)
 
     ax.grid(True, which="both", alpha=0.3, axis="y")
