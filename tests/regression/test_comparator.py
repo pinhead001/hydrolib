@@ -14,7 +14,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from hydrolib.core import log_pearson3_ppf
-from hydrolib.regression.basin_chars import BasinCharacteristics, HydrologicArea
+from hydrolib.regression.basin_chars import (
+    CSL1085LFP,
+    DRNAREA,
+    BasinCharacteristics,
+)
 from hydrolib.regression.comparator import (
     ComparisonResult,
     KarstFlag,
@@ -23,7 +27,7 @@ from hydrolib.regression.comparator import (
     WeightedEstimate,
 )
 from hydrolib.regression.roi_analysis import STANDARD_AEPS, RoiAnalysis, RoiSite
-from hydrolib.regression.sir2024_5130 import SIR2024_5130, GlsEquation
+from hydrolib.regression.sir2024_5130 import SIR2024_5130, TN_AREA2
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -35,9 +39,8 @@ def basin() -> BasinCharacteristics:
     return BasinCharacteristics(
         site_no="SITE01",
         site_name="Test Creek at Test, TN",
-        drainage_area_sqmi=85.3,
-        hydrologic_area=HydrologicArea.AREA2,
-        slope_1085_ftmi=4.7,
+        region=TN_AREA2,
+        predictors={DRNAREA: 85.3, CSL1085LFP: 4.7},
     )
 
 
@@ -65,7 +68,7 @@ def gls_table(basin) -> SIR2024_5130:
         0.002: 38.0,
     }
     coeff_dict = {
-        (HydrologicArea.AREA2, aep): {
+        (TN_AREA2, aep): {
             "b0": b0,
             "b1": 0.75,
             "b2": 0.38,
@@ -95,9 +98,8 @@ def make_candidate_pool(target_basin: BasinCharacteristics) -> List[RoiSite]:
         b = BasinCharacteristics(
             site_no=sno,
             site_name=f"Site {sno}",
-            drainage_area_sqmi=da,
-            hydrologic_area=HydrologicArea.AREA2,
-            slope_1085_ftmi=slope,
+            region=TN_AREA2,
+            predictors={DRNAREA: da, CSL1085LFP: slope},
         )
         site = RoiSite(
             site_no=sno,

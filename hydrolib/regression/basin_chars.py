@@ -1,206 +1,261 @@
 """
-hydrolib.regression.basin_chars - Basin characteristics for regional regression.
+hydrolib.regression.basin_chars - Generic basin characteristics container.
 
-Stores StreamStats-derived basin attributes needed by SIR 2024-5130
-regression equations (drainage area, 10-85 channel slope, hydrologic area,
-and auxiliary predictors).
+:class:`BasinCharacteristics` stores the hydraulic and physical attributes
+of a drainage basin required by regional regression equations.  Predictor
+values are stored in a flexible ``predictors`` dict keyed by **USGS
+StreamStats parameter codes** (e.g. ``"DRNAREA"``, ``"CSL1085LFP"``), so
+the same class works for equations in any state or publication.
+
+Common StreamStats codes
+------------------------
+``DRNAREA``   — Drainage area (sq mi)
+``CSL1085LFP``— 10-85 channel slope (ft/mi)
+``I2``        — 2-year precipitation intensity (in/hr)
+``IMPERV``    — Impervious cover (%)
+``ELEV``      — Mean basin elevation (ft)
+``FOREST``    — Forest cover (%)
+``PRECIP``    — Mean annual precipitation (in)
+``BFIPCT``    — Base-flow index (%)
+
+Convenience properties expose the most common codes as named attributes
+so that existing code using ``basin.drainage_area_sqmi`` continues to work.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from enum import Enum, auto
-from typing import Optional
+from typing import Dict, Optional
+
+from hydrolib.regression.region import HydrologicRegion
 
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Hydrologic area enumeration (SIR 2024-5130)
+# BasinCharacteristics
 # ---------------------------------------------------------------------------
 
-
-class HydrologicArea(Enum):
-    """
-    Hydrologic area designation from SIR 2024-5130 (Tennessee).
-
-    Attributes
-    ----------
-    AREA1 : str
-        West Tennessee lowlands; predictor variables: DA + 2-yr climate factor.
-    AREA2 : str
-        Middle Tennessee; predictor variables: DA + 10-85 channel slope (S1085).
-    AREA3 : str
-        Upper Cumberland / East Tennessee Valley; predictor variable: DA only.
-    AREA4 : str
-        Ridge and Valley / Blue Ridge; predictor variables: DA + % impervious.
-    """
-
-    AREA1 = "area1"
-    AREA2 = "area2"
-    AREA3 = "area3"
-    AREA4 = "area4"
-
-    @classmethod
-    def from_int(cls, n: int) -> "HydrologicArea":
-        """Construct from integer (1–4)."""
-        mapping = {1: cls.AREA1, 2: cls.AREA2, 3: cls.AREA3, 4: cls.AREA4}
-        if n not in mapping:
-            raise ValueError(f"Hydrologic area must be 1-4, got {n}")
-        return mapping[n]
-
-    @property
-    def label(self) -> str:
-        """Human-readable label."""
-        return f"Hydrologic Area {self.value[-1].upper()}"
-
-
-# ---------------------------------------------------------------------------
-# Basin characteristics dataclass
-# ---------------------------------------------------------------------------
+# StreamStats code constants (avoid magic strings in calling code)
+DRNAREA = "DRNAREA"
+CSL1085LFP = "CSL1085LFP"
+I2 = "I2"
+IMPERV = "IMPERV"
+ELEV = "ELEV"
+FOREST = "FOREST"
+PRECIP = "PRECIP"
+BFIPCT = "BFIPCT"
 
 
 @dataclass
 class BasinCharacteristics:
     """
-    Basin characteristics for a site, derived from StreamStats.
+    Physical and climatic characteristics of a drainage basin.
 
     Parameters
     ----------
     site_no : str
-        USGS 8-digit site number (or descriptive label for ungaged sites).
+        USGS 8-digit site number, or a descriptive label for ungaged sites.
     site_name : str
-        Descriptive site name.
-    drainage_area_sqmi : float
-        Drainage area in square miles (from StreamStats watershed delineation).
-    hydrologic_area : HydrologicArea
-        SIR 2024-5130 hydrologic area assignment.
-    slope_1085_ftmi : float, optional
-        10-85 channel slope in feet per mile (required for AREA2).
-        Computed by StreamStats from 10% and 85% of channel length.
-    climate_factor_2yr : float, optional
-        2-year recurrence-interval precipitation intensity (in/hr or inches),
-        required for AREA1.  Obtain from NOAA Atlas 14 or StreamStats.
-    pct_impervious : float, optional
-        Percentage of drainage basin covered by impervious surfaces (0-100),
-        required for AREA4.  Obtain from NLCD via StreamStats.
+        Station or site name.
+    region : HydrologicRegion
+        Hydrologic region to which this site is assigned.
+    predictors : dict
+        Mapping of StreamStats parameter code -> value.  Must include all
+        codes listed in ``region.required_predictors``.
     latitude : float, optional
-        Outlet latitude (decimal degrees, WGS84).  Used for ROI distance.
+        Outlet latitude (decimal degrees, WGS84).  Used for ROI geographic
+        distance.
     longitude : float, optional
-        Outlet longitude (decimal degrees, WGS84).  Used for ROI distance.
-    state : str
-        State abbreviation (default "TN").
-    notes : str
-        Free-text field for site-specific notes (karst, regulation, etc.).
+        Outlet longitude (decimal degrees, WGS84).
+    notes : str, optional
+        Free-text field (karst observations, regulation flags, etc.).
 
     Examples
     --------
-    >>> from hydrolib.regression.basin_chars import BasinCharacteristics, HydrologicArea
-    >>> site = BasinCharacteristics(
+    >>> from hydrolib.regression.region import HydrologicRegion
+    >>> tn_area2 = HydrologicRegion(
+    ...     code="TN_AREA2", label="TN Area 2", state="TN",
+    ...     required_predictors=("DRNAREA", "CSL1085LFP"),
+    ... )
+    >>> basin = BasinCharacteristics(
     ...     site_no="03606500",
     ...     site_name="Big Sandy River at Bruceton, TN",
-    ...     drainage_area_sqmi=779.0,
-    ...     hydrologic_area=HydrologicArea.AREA2,
-    ...     slope_1085_ftmi=2.4,
+    ...     region=tn_area2,
+    ...     predictors={"DRNAREA": 779.0, "CSL1085LFP": 2.4},
     ... )
+    >>> basin.drainage_area_sqmi
+    779.0
+
+    Multi-state / arbitrary-predictor example (Kentucky)::
+
+        ky_reg4 = HydrologicRegion(
+            code="KY_REGION4", label="KY Region 4", state="KY",
+            required_predictors=("DRNAREA", "CSL1085LFP"),
+            publication="WRIR 03-4180",
+        )
+        ky_basin = BasinCharacteristics(
+            site_no="03287500",
+            site_name="Licking River at Farmers, KY",
+            region=ky_reg4,
+            predictors={"DRNAREA": 1140.0, "CSL1085LFP": 1.8},
+        )
     """
 
     site_no: str
     site_name: str
-    drainage_area_sqmi: float
-    hydrologic_area: HydrologicArea
-    slope_1085_ftmi: Optional[float] = None
-    climate_factor_2yr: Optional[float] = None
-    pct_impervious: Optional[float] = None
+    region: HydrologicRegion
+    predictors: Dict[str, float] = field(default_factory=dict)
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-    state: str = "TN"
     notes: str = ""
 
     def __post_init__(self) -> None:
-        """Validate required predictors for the assigned hydrologic area."""
-        if self.drainage_area_sqmi <= 0:
-            raise ValueError(f"drainage_area_sqmi must be > 0, got {self.drainage_area_sqmi}")
-        if self.hydrologic_area == HydrologicArea.AREA2 and self.slope_1085_ftmi is None:
-            raise ValueError("slope_1085_ftmi is required for HydrologicArea.AREA2 (SIR 2024-5130)")
-        if self.hydrologic_area == HydrologicArea.AREA1 and self.climate_factor_2yr is None:
-            log.warning(
-                "climate_factor_2yr not set for AREA1 site %s; GLS computation will fail.",
-                self.site_no,
-            )
-        if self.hydrologic_area == HydrologicArea.AREA4 and self.pct_impervious is None:
-            log.warning(
-                "pct_impervious not set for AREA4 site %s; GLS computation will fail.",
-                self.site_no,
-            )
+        """Validate that all required predictors are present and positive."""
+        try:
+            self.region.validate_predictors(self.predictors)
+        except ValueError as exc:
+            raise ValueError(
+                f"BasinCharacteristics validation failed for site {self.site_no!r}: {exc}"
+            ) from exc
+
+    # ------------------------------------------------------------------
+    # Convenience properties (most-common StreamStats codes)
+    # ------------------------------------------------------------------
+
+    @property
+    def drainage_area_sqmi(self) -> Optional[float]:
+        """Drainage area in square miles (``DRNAREA``)."""
+        return self.predictors.get(DRNAREA)
+
+    @property
+    def slope_1085_ftmi(self) -> Optional[float]:
+        """10-85 channel slope in ft/mi (``CSL1085LFP``)."""
+        return self.predictors.get(CSL1085LFP)
+
+    @property
+    def climate_factor_2yr(self) -> Optional[float]:
+        """2-year precipitation intensity (``I2``)."""
+        return self.predictors.get(I2)
+
+    @property
+    def pct_impervious(self) -> Optional[float]:
+        """Percent impervious cover (``IMPERV``)."""
+        return self.predictors.get(IMPERV)
+
+    @property
+    def state(self) -> str:
+        """State abbreviation, inherited from the assigned region."""
+        return self.region.state
+
+    # ------------------------------------------------------------------
+    # Factory helpers
+    # ------------------------------------------------------------------
 
     @classmethod
     def from_streamstats(
         cls,
         site_no: str,
         site_name: str,
-        hydrologic_area: HydrologicArea,
-        streamstats_params: dict,
+        region: HydrologicRegion,
+        streamstats_params: Dict[str, float],
+        *,
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+        notes: str = "",
     ) -> "BasinCharacteristics":
         """
-        Construct from a StreamStats parameter dictionary.
+        Construct directly from a StreamStats parameter dictionary.
 
-        StreamStats returns basin characteristics as a list of parameter
-        objects; this helper extracts the relevant fields by their
-        standard StreamStats parameter codes.
+        All keys from *streamstats_params* are forwarded to ``predictors``,
+        so the full StreamStats response can be passed without pre-filtering.
+        Required predictor validation still runs via ``__post_init__``.
 
         Parameters
         ----------
         site_no : str
-            USGS site number or descriptive label.
         site_name : str
-            Station name.
-        hydrologic_area : HydrologicArea
-            SIR 2024-5130 area designation.
+        region : HydrologicRegion
         streamstats_params : dict
-            Dict mapping StreamStats parameter code -> value.
-            Expected keys (all optional except ``DRNAREA``):
+            Mapping StreamStats parameter code -> numeric value.
+            Typically obtained from the StreamStats REST API response::
 
-            * ``DRNAREA``  – drainage area (sq mi)
-            * ``CSL1085LFP`` – 10-85 channel slope (ft/mi)
-            * ``I2`` – 2-year precipitation intensity (in/hr)
-            * ``IMPERV`` – % impervious
-            * ``LAT`` – outlet latitude
-            * ``LNG`` – outlet longitude
+                {
+                    "DRNAREA": 85.3,
+                    "CSL1085LFP": 4.7,
+                    "ELEV": 1240.0,
+                    ...
+                }
+
+        latitude, longitude : float, optional
+        notes : str, optional
 
         Returns
         -------
         BasinCharacteristics
+
+        Raises
+        ------
+        ValueError
+            If any required predictor for *region* is missing.
         """
-        da = streamstats_params.get("DRNAREA")
-        if da is None:
-            raise KeyError("'DRNAREA' not found in streamstats_params")
+        # Convert all values to float, silently skip non-numeric entries
+        predictors: Dict[str, float] = {}
+        for k, v in streamstats_params.items():
+            try:
+                predictors[k] = float(v)
+            except (TypeError, ValueError):
+                log.debug("Skipping non-numeric StreamStats param %s=%r", k, v)
 
         return cls(
             site_no=site_no,
             site_name=site_name,
-            drainage_area_sqmi=float(da),
-            hydrologic_area=hydrologic_area,
-            slope_1085_ftmi=streamstats_params.get("CSL1085LFP"),
-            climate_factor_2yr=streamstats_params.get("I2"),
-            pct_impervious=streamstats_params.get("IMPERV"),
-            latitude=streamstats_params.get("LAT"),
-            longitude=streamstats_params.get("LNG"),
+            region=region,
+            predictors=predictors,
+            latitude=latitude,
+            longitude=longitude,
+            notes=notes,
         )
+
+    # ------------------------------------------------------------------
+    # Utilities
+    # ------------------------------------------------------------------
+
+    def predictor_value(self, code: str) -> float:
+        """
+        Return the value of a predictor by StreamStats code.
+
+        Parameters
+        ----------
+        code : str
+            StreamStats parameter code.
+
+        Returns
+        -------
+        float
+
+        Raises
+        ------
+        KeyError
+            If *code* is not in ``predictors``.
+        """
+        if code not in self.predictors:
+            raise KeyError(
+                f"Predictor {code!r} not found for site {self.site_no!r}. "
+                f"Available: {sorted(self.predictors)}"
+            )
+        return self.predictors[code]
 
     def summary(self) -> str:
         """Return a formatted one-paragraph summary."""
         lines = [
-            f"Site: {self.site_no} — {self.site_name}",
-            f"  Hydrologic area : {self.hydrologic_area.label}",
-            f"  Drainage area   : {self.drainage_area_sqmi:.2f} sq mi",
+            f"Site  : {self.site_no} — {self.site_name}",
+            f"Region: {self.region}",
         ]
-        if self.slope_1085_ftmi is not None:
-            lines.append(f"  S1085 slope     : {self.slope_1085_ftmi:.3f} ft/mi")
-        if self.climate_factor_2yr is not None:
-            lines.append(f"  2-yr CF         : {self.climate_factor_2yr:.3f}")
-        if self.pct_impervious is not None:
-            lines.append(f"  % impervious    : {self.pct_impervious:.1f}%")
+        for code in sorted(self.predictors):
+            lines.append(f"  {code:<16} : {self.predictors[code]:.4g}")
+        if self.latitude is not None:
+            lines.append(f"  {'Lat/Lon':<16} : {self.latitude:.4f}, {self.longitude:.4f}")
         if self.notes:
-            lines.append(f"  Notes           : {self.notes}")
+            lines.append(f"  {'Notes':<16} : {self.notes}")
         return "\n".join(lines)

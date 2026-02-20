@@ -33,7 +33,7 @@ import pandas as pd
 import requests
 
 from hydrolib.core import log_pearson3_ppf
-from hydrolib.regression.basin_chars import BasinCharacteristics, HydrologicArea
+from hydrolib.regression.basin_chars import BasinCharacteristics
 
 log = logging.getLogger(__name__)
 
@@ -442,26 +442,30 @@ class RoiAnalysis:
         """
         Euclidean distance in normalised log10-characteristic space.
 
-        Uses log10(DA) always.  Appends log10(S1085) when available on
-        both sites (Area 2 workflow).
+        Uses the **intersection** of predictor codes that are present and
+        positive in both the target and candidate ``predictors`` dicts.
+        This is fully generic: for Tennessee Area 2 sites both ``DRNAREA``
+        and ``CSL1085LFP`` contribute; for Area 3 (DA-only) only
+        ``DRNAREA`` contributes; for a Kentucky study with ``ELEV`` both
+        ``DRNAREA`` and ``ELEV`` would contribute.
+
+        If no predictor code is shared, distance is 0 (caller receives
+        equal weights — log warning is emitted).
         """
         components: List[float] = []
+        for code in sorted(target.predictors):
+            t_val = target.predictors.get(code)
+            c_val = candidate.predictors.get(code)
+            if t_val is not None and c_val is not None and t_val > 0 and c_val > 0:
+                components.append(math.log10(c_val) - math.log10(t_val))
 
-        # Drainage area term (always included)
-        components.append(
-            math.log10(candidate.drainage_area_sqmi) - math.log10(target.drainage_area_sqmi)
-        )
-
-        # Slope term (Area 2)
-        if (
-            target.slope_1085_ftmi is not None
-            and candidate.slope_1085_ftmi is not None
-            and target.slope_1085_ftmi > 0
-            and candidate.slope_1085_ftmi > 0
-        ):
-            components.append(
-                math.log10(candidate.slope_1085_ftmi) - math.log10(target.slope_1085_ftmi)
+        if not components:
+            log.debug(
+                "No shared positive predictors between %s and %s; distance = 0",
+                target.site_no,
+                candidate.site_no,
             )
+            return 0.0
 
         return math.sqrt(sum(c * c for c in components))
 

@@ -15,13 +15,18 @@ import pandas as pd
 import pytest
 
 from hydrolib.core import log_pearson3_ppf
-from hydrolib.regression.basin_chars import BasinCharacteristics, HydrologicArea
+from hydrolib.regression.basin_chars import (
+    CSL1085LFP,
+    DRNAREA,
+    BasinCharacteristics,
+)
 from hydrolib.regression.roi_analysis import (
     STANDARD_AEPS,
     RoiAnalysis,
     RoiSite,
     fetch_nwis_peak_data,
 )
+from hydrolib.regression.sir2024_5130 import TN_AREA2, TN_AREA3
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -34,9 +39,8 @@ def target() -> BasinCharacteristics:
     return BasinCharacteristics(
         site_no="UNGAGED",
         site_name="Example Creek",
-        drainage_area_sqmi=100.0,
-        hydrologic_area=HydrologicArea.AREA2,
-        slope_1085_ftmi=5.0,
+        region=TN_AREA2,
+        predictors={DRNAREA: 100.0, CSL1085LFP: 5.0},
         latitude=36.0,
         longitude=-86.5,
     )
@@ -57,9 +61,8 @@ def make_roi_site(
     basin = BasinCharacteristics(
         site_no=site_no,
         site_name=f"Site {site_no}",
-        drainage_area_sqmi=da,
-        hydrologic_area=HydrologicArea.AREA2,
-        slope_1085_ftmi=slope,
+        region=TN_AREA2,
+        predictors={DRNAREA: da, CSL1085LFP: slope},
         latitude=lat,
         longitude=lon,
     )
@@ -119,8 +122,8 @@ class TestRoiSite:
         basin = BasinCharacteristics(
             site_no="X",
             site_name="X",
-            drainage_area_sqmi=10.0,
-            hydrologic_area=HydrologicArea.AREA3,
+            region=TN_AREA3,
+            predictors={DRNAREA: 10.0},
         )
         site = RoiSite(site_no="X", site_name="X", basin=basin)
         assert not site.has_lp3
@@ -135,8 +138,8 @@ class TestRoiSite:
         basin = BasinCharacteristics(
             site_no="X",
             site_name="X",
-            drainage_area_sqmi=100.0,
-            hydrologic_area=HydrologicArea.AREA3,
+            region=TN_AREA3,
+            predictors={DRNAREA: 100.0},
         )
         site = RoiSite(
             site_no="X",
@@ -154,8 +157,8 @@ class TestRoiSite:
         basin = BasinCharacteristics(
             site_no="X",
             site_name="X",
-            drainage_area_sqmi=10.0,
-            hydrologic_area=HydrologicArea.AREA3,
+            region=TN_AREA3,
+            predictors={DRNAREA: 10.0},
         )
         site = RoiSite(site_no="X", site_name="X", basin=basin)
         assert site.quantile(0.01) is None
@@ -242,14 +245,14 @@ class TestRoiAnalysisWeighting:
         t = BasinCharacteristics(
             site_no="T",
             site_name="T",
-            drainage_area_sqmi=100.0,
-            hydrologic_area=HydrologicArea.AREA3,
+            region=TN_AREA3,
+            predictors={DRNAREA: 100.0},
         )
         c = BasinCharacteristics(
             site_no="C",
             site_name="C",
-            drainage_area_sqmi=200.0,
-            hydrologic_area=HydrologicArea.AREA3,
+            region=TN_AREA3,
+            predictors={DRNAREA: 200.0},
         )
         expected = abs(math.log10(200.0) - math.log10(100.0))
         assert RoiAnalysis._char_distance(t, c) == pytest.approx(expected, rel=1e-9)
@@ -264,9 +267,8 @@ class TestRoiAnalysisWeighting:
         no_coord = BasinCharacteristics(
             site_no="X",
             site_name="X",
-            drainage_area_sqmi=100.0,
-            hydrologic_area=HydrologicArea.AREA2,
-            slope_1085_ftmi=5.0,
+            region=TN_AREA2,
+            predictors={DRNAREA: 100.0, CSL1085LFP: 5.0},
         )
         assert RoiAnalysis._geo_distance(target, no_coord) == 0.0
 
@@ -275,16 +277,16 @@ class TestRoiAnalysisWeighting:
         nashville = BasinCharacteristics(
             site_no="A",
             site_name="A",
-            drainage_area_sqmi=1.0,
-            hydrologic_area=HydrologicArea.AREA3,
+            region=TN_AREA3,
+            predictors={DRNAREA: 1.0},
             latitude=36.1627,
             longitude=-86.7816,
         )
         memphis = BasinCharacteristics(
             site_no="B",
             site_name="B",
-            drainage_area_sqmi=1.0,
-            hydrologic_area=HydrologicArea.AREA3,
+            region=TN_AREA3,
+            predictors={DRNAREA: 1.0},
             latitude=35.1495,
             longitude=-90.0490,
         )

@@ -34,9 +34,9 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from hydrolib.regression.basin_chars import BasinCharacteristics, HydrologicArea
+from hydrolib.regression.basin_chars import BasinCharacteristics
+from hydrolib.regression.regression_table import RegressionTable
 from hydrolib.regression.roi_analysis import STANDARD_AEPS, RoiAnalysis
-from hydrolib.regression.sir2024_5130 import SIR2024_5130
 
 log = logging.getLogger(__name__)
 
@@ -283,8 +283,8 @@ class PeakFlowComparator:
     ----------
     basin : BasinCharacteristics
         Basin characteristics for the target site.
-    gls_table : SIR2024_5130
-        Populated GLS equation table from SIR 2024-5130 Table 4.
+    gls_table : RegressionTable
+        Populated GLS equation table (any state / publication).
     roi_analysis : RoiAnalysis
         Fully-run ROI analysis (peaks fetched, EMA fitted, weights computed).
     site_assessment : SiteAssessment, optional
@@ -293,15 +293,16 @@ class PeakFlowComparator:
     Examples
     --------
     >>> from hydrolib.regression import (
-    ...     BasinCharacteristics, HydrologicArea,
-    ...     SIR2024_5130, RoiAnalysis, PeakFlowComparator,
+    ...     BasinCharacteristics, HydrologicRegion,
+    ...     RegressionTable, RoiAnalysis, PeakFlowComparator,
     ...     SiteAssessment, KarstFlag,
     ... )
+    >>> from hydrolib.regression.sir2024_5130 import HydrologicArea, SIR2024_5130
     >>>
     >>> basin = BasinCharacteristics(
     ...     site_no="UNGAGED01", site_name="Example Creek",
-    ...     drainage_area_sqmi=85.3, hydrologic_area=HydrologicArea.AREA2,
-    ...     slope_1085_ftmi=4.7,
+    ...     region=HydrologicArea.AREA2,
+    ...     predictors={"DRNAREA": 85.3, "CSL1085LFP": 4.7},
     ... )
     >>> assessment = SiteAssessment(
     ...     karst_flag=KarstFlag.POSSIBLE,
@@ -316,7 +317,7 @@ class PeakFlowComparator:
     def __init__(
         self,
         basin: BasinCharacteristics,
-        gls_table: SIR2024_5130,
+        gls_table: RegressionTable,
         roi_analysis: RoiAnalysis,
         site_assessment: Optional[SiteAssessment] = None,
     ) -> None:
@@ -377,7 +378,7 @@ class PeakFlowComparator:
 
             sep_pct = None
             try:
-                eq = self.gls_table.get_equation(self.basin.hydrologic_area, aep)
+                eq = self.gls_table.get_equation(self.basin.region, aep)
                 sep_pct = eq.sep_pct
             except KeyError:
                 pass
@@ -422,7 +423,7 @@ class PeakFlowComparator:
     def _gls_variance(self, aep: float) -> Optional[float]:
         """Return GLS prediction variance (log10 space) for the given AEP."""
         try:
-            return self.gls_table.get_variance(self.basin.hydrologic_area, aep)
+            return self.gls_table.get_variance(self.basin.region, aep)
         except KeyError:
             return None
 
@@ -487,7 +488,7 @@ class PeakFlowComparator:
             "=" * 70,
             "GLS Regression vs ROI Analysis — Peak Flow Comparison",
             f"Site  : {self.basin.site_no} — {self.basin.site_name}",
-            f"Area  : {self.basin.hydrologic_area.label}",
+            f"Area  : {self.basin.region.label}",
             f"DA    : {self.basin.drainage_area_sqmi:.2f} sq mi",
         ]
         if self.basin.slope_1085_ftmi is not None:
