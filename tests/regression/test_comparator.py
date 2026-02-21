@@ -26,8 +26,9 @@ from hydrolib.regression.comparator import (
     SiteAssessment,
     WeightedEstimate,
 )
+from hydrolib.regression.regression_table import RegressionTable
 from hydrolib.regression.roi_analysis import STANDARD_AEPS, RoiAnalysis, RoiSite
-from hydrolib.regression.sir2024_5130 import SIR2024_5130, TN_AREA2
+from hydrolib.regression.states.tennessee import TN_AREA2
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -45,7 +46,7 @@ def basin() -> BasinCharacteristics:
 
 
 @pytest.fixture
-def gls_table(basin) -> SIR2024_5130:
+def gls_table(basin) -> RegressionTable:
     """Synthetic GLS table for Area 2 across all standard AEPs."""
     b0_by_aep = {
         0.5: 1.80,
@@ -69,16 +70,15 @@ def gls_table(basin) -> SIR2024_5130:
     }
     coeff_dict = {
         (TN_AREA2, aep): {
-            "b0": b0,
-            "b1": 0.75,
-            "b2": 0.38,
+            "intercept": b0,
+            "coefficients": {"DRNAREA": 0.75, "CSL1085LFP": 0.38},
             "sep_pct": sep_by_aep[aep],
             "pseudo_r2": 0.92,
             "eyr": 18.0,
         }
         for aep, b0 in b0_by_aep.items()
     }
-    return SIR2024_5130.load_from_dict(coeff_dict)
+    return RegressionTable.load_from_dict(coeff_dict)
 
 
 def make_candidate_pool(target_basin: BasinCharacteristics) -> List[RoiSite]:

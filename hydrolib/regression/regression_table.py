@@ -15,10 +15,11 @@ CSV Format
 The canonical on-disk format is a "wide" CSV where predictor coefficients
 occupy named columns::
 
-    region_code, state, aep, intercept, DRNAREA, CSL1085LFP, I2, IMPERV, ...,
+    region_code, state, aep, intercept, DRNAREA, CSL1085LFP, ELEV, PRECIP, ...,
     sep_pct, pseudo_r2, eyr
 
 Rules:
+
 * Any column whose name is **not** in the reserved set
   ``{region_code, region_label, state, aep, intercept, sep_pct, pseudo_r2,
   eyr, publication, return_period_yr, notes}`` is interpreted as a predictor
@@ -26,18 +27,18 @@ Rules:
 * A blank or NaN cell in a predictor column means that predictor is **not
   used** in that equation row.
 * A companion ``region_label`` column and ``publication`` column are optional
-  but recommended so that the CSV is self-documenting.
+  but recommended for provenance.
 
-This format is deliberately human-readable: it mirrors how USGS report
-tables are typically typeset.  A single CSV can encode equations for
-multiple states and regions simultaneously.
+This format is human-readable and mirrors how USGS report tables are typically
+typeset.  A single CSV can encode equations for multiple states and regions
+simultaneously, enabling a nationwide equation database in one file.
 
-Multi-state example (3 rows from a hypothetical CSV)::
+Multi-state example (3 rows from a hypothetical nationwide CSV)::
 
-    region_code,state,aep,intercept,DRNAREA,CSL1085LFP,I2,sep_pct
-    TN_AREA2,TN,0.01,2.90,0.75,0.38,,34.0
-    TN_AREA3,TN,0.01,2.85,0.72,,,36.0
-    KY_REGION1,KY,0.01,3.10,0.78,0.35,,38.0
+    region_code,state,aep,intercept,DRNAREA,CSL1085LFP,ELEV,PRECIP,sep_pct
+    TN-2,TN,0.01,2.40,0.75,0.38,,,34.0
+    GA-1,GA,0.01,1.82,0.80,,0.31,,38.0
+    MT-1,MT,0.01,-0.85,0.76,,0.48,0.62,45.0
 
 """
 
@@ -48,9 +49,7 @@ import logging
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
-
-import numpy as np
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from hydrolib.regression.basin_chars import BasinCharacteristics
 from hydrolib.regression.region import HydrologicRegion, RegionRegistry
@@ -69,7 +68,6 @@ _RESERVED_COLS: Set[str] = {
     "aep",
     "return_period_yr",
     "intercept",
-    "b0",  # legacy alias for intercept
     "sep_pct",
     "pseudo_r2",
     "eyr",
@@ -97,12 +95,11 @@ class GlsEquation:
     intercept : float
         Constant term (b₀) of the log10-linear regression.
     coefficients : dict
-        Mapping StreamStats predictor code → exponent.  E.g.::
+        Mapping StreamStats predictor code → exponent.  For example::
 
             {"DRNAREA": 0.75, "CSL1085LFP": 0.38}
 
-        An empty dict is valid when the equation has no basin-characteristic
-        predictors (unusual but permitted).
+        An empty dict is valid for intercept-only equations.
     sep_pct : float, optional
         Average standard error of prediction in percent.
     pseudo_r2 : float, optional
@@ -113,12 +110,12 @@ class GlsEquation:
     Examples
     --------
     >>> from hydrolib.regression.region import HydrologicRegion
-    >>> ky = HydrologicRegion("KY_R1", "KY Region 1", "KY",
-    ...                       required_predictors=("DRNAREA", "CSL1085LFP"))
-    >>> eq = GlsEquation(region=ky, aep=0.01,
-    ...                  intercept=3.10,
-    ...                  coefficients={"DRNAREA": 0.78, "CSL1085LFP": 0.35},
-    ...                  sep_pct=38.0)
+    >>> mt_mtn = HydrologicRegion("MT-1", "Montana Mountain", "MT",
+    ...                           required_predictors=("DRNAREA", "ELEV", "PRECIP"))
+    >>> eq = GlsEquation(region=mt_mtn, aep=0.01,
+    ...                  intercept=-0.85,
+    ...                  coefficients={"DRNAREA": 0.76, "ELEV": 0.48, "PRECIP": 0.62},
+    ...                  sep_pct=45.0)
     """
 
     region: HydrologicRegion
@@ -180,7 +177,7 @@ class GlsEquation:
         Raises
         ------
         ValueError
-            If the basin's region does not match this equation's region.
+            If the basin's region code does not match this equation's region.
         KeyError
             If a required predictor is missing from *basin*.
         """
@@ -231,36 +228,47 @@ class RegressionTable:
     Publication-agnostic container for GLS regression equations.
 
     Equations are indexed by ``(region_code, aep)`` and can be loaded from
-    a Python dict, a wide-format CSV, or constructed programmatically.
+    a Python dict or a wide-format CSV.  A single table can hold equations
+    for multiple states, enabling a nationwide database.
 
     Parameters
     ----------
     publication : str, optional
-        Citation or DOI for the source report (recorded for provenance).
+        Citation or DOI for the source report (for provenance).
     region_registry : RegionRegistry, optional
         Pre-populated registry of :class:`HydrologicRegion` objects.
         When loading from CSV, regions are created automatically if not
-        already in the registry.
+        already registered.
 
     Examples
     --------
-    Build from a dict::
+    Build from a dict (preferred programmatic API)::
 
+        from hydrolib.regression.states.tennessee import TN_AREA2
         coeff_dict = {
-            (tn_area2, 0.01): {
-                "intercept": 2.90,
+            (TN_AREA2, 0.01): {
+                "intercept": 2.40,
                 "coefficients": {"DRNAREA": 0.75, "CSL1085LFP": 0.38},
                 "sep_pct": 34.0,
             },
-            ...
         }
         table = RegressionTable.load_from_dict(coeff_dict)
         q100 = table.estimate(basin, aep=0.01)
 
     Load from CSV::
 
-        table = RegressionTable.load_from_csv("regional_equations.csv")
-        df = table.summary_table(basin)
+        table = RegressionTable.load_from_csv("nationwide_equations.csv")
+
+    Merge tables from multiple states::
+
+        from hydrolib.regression.states.tennessee import build_tennessee_table
+        from hydrolib.regression.states.georgia import build_georgia_table
+        from hydrolib.regression.states.montana import build_montana_table
+        national = RegressionTable.merge(
+            build_tennessee_table(),
+            build_georgia_table(),
+            build_montana_table(),
+        )
     """
 
     def __init__(
@@ -293,15 +301,11 @@ class RegressionTable:
             Keys are ``(HydrologicRegion, aep)`` tuples.
             Values are dicts with keys:
 
-            * ``"intercept"`` (float) — required
-            * ``"coefficients"`` (dict str→float) — required
-            * ``"sep_pct"`` (float) — optional
-            * ``"pseudo_r2"`` (float) — optional
-            * ``"eyr"`` (float) — optional
-
-            For backward compatibility, a value dict may instead use the
-            older ``"b0"``, ``"b1"``, ``"b2"`` style (see
-            :func:`_legacy_dict_to_equation`).
+            * ``"intercept"`` (float) — constant term.
+            * ``"coefficients"`` (dict str→float) — predictor exponents.
+            * ``"sep_pct"`` (float) — optional standard error of prediction.
+            * ``"pseudo_r2"`` (float) — optional.
+            * ``"eyr"`` (float) — optional equivalent years of record.
 
         publication : str, optional
 
@@ -313,7 +317,7 @@ class RegressionTable:
         --------
         >>> d = {
         ...     (tn_area2, 0.01): {
-        ...         "intercept": 2.90,
+        ...         "intercept": 2.40,
         ...         "coefficients": {"DRNAREA": 0.75, "CSL1085LFP": 0.38},
         ...         "sep_pct": 34.0,
         ...     },
@@ -322,7 +326,15 @@ class RegressionTable:
         """
         table = cls(publication=publication)
         for (region, aep), kw in coeff_dict.items():
-            eq = _dict_to_equation(region, aep, kw)
+            eq = GlsEquation(
+                region=region,
+                aep=aep,
+                intercept=float(kw["intercept"]),
+                coefficients=dict(kw.get("coefficients", {})),
+                sep_pct=kw.get("sep_pct"),
+                pseudo_r2=kw.get("pseudo_r2"),
+                eyr=kw.get("eyr"),
+            )
             table._add(eq)
             table._registry.register(region)
         return table
@@ -339,8 +351,8 @@ class RegressionTable:
         Load the equation table from a wide-format CSV file.
 
         The CSV must have at minimum the columns ``region_code``, ``aep``,
-        and ``intercept`` (or the legacy ``b0``).  Any column whose name
-        is not in the reserved set is treated as a predictor coefficient.
+        and ``intercept``.  Any column whose name is not in the reserved set
+        is treated as a predictor coefficient.
 
         Optional metadata columns: ``region_label``, ``state``,
         ``publication``, ``sep_pct``, ``pseudo_r2``, ``eyr``, ``notes``.
@@ -351,7 +363,8 @@ class RegressionTable:
         publication : str, optional
             If provided, overrides any ``publication`` column in the CSV.
         region_registry : RegionRegistry, optional
-            Existing registry to look up / register regions into.
+            Existing registry; regions are created automatically for
+            any ``region_code`` not already registered.
 
         Returns
         -------
@@ -369,16 +382,14 @@ class RegressionTable:
             if reader.fieldnames is None:
                 raise ValueError(f"CSV file is empty or has no header: {path}")
 
-            # Identify predictor columns (anything not reserved)
             predictor_cols = [c for c in reader.fieldnames if c not in _RESERVED_COLS]
 
             pub_from_csv = ""
             for row in reader:
                 region = _region_from_row(row, registry)
                 aep = float(row["aep"])
-                intercept = float(row.get("intercept") or row.get("b0", 0))
+                intercept = float(row["intercept"])
 
-                # Parse predictor coefficients from dynamic columns
                 coefficients: Dict[str, float] = {}
                 for col in predictor_cols:
                     val_str = row.get(col, "").strip()
@@ -412,6 +423,44 @@ class RegressionTable:
         )
         return table
 
+    @classmethod
+    def merge(cls, *tables: "RegressionTable", publication: str = "") -> "RegressionTable":
+        """
+        Combine multiple :class:`RegressionTable` instances into one.
+
+        Useful for building a nationwide database from per-state tables::
+
+            national = RegressionTable.merge(
+                build_tennessee_table(),
+                build_georgia_table(),
+                build_montana_table(),
+            )
+
+        Parameters
+        ----------
+        *tables : RegressionTable
+            Source tables to merge.  Later tables overwrite earlier ones
+            for duplicate ``(region_code, aep)`` keys.
+        publication : str, optional
+            Publication string for the merged table.  If not provided,
+            individual publication strings are concatenated.
+
+        Returns
+        -------
+        RegressionTable
+        """
+        combined = cls(publication=publication)
+        pub_parts: List[str] = []
+        for table in tables:
+            for eq in table._eqs.values():
+                combined._add(eq)
+                combined._registry.register(eq.region)
+            if table.publication and table.publication not in pub_parts:
+                pub_parts.append(table.publication)
+        if not publication and pub_parts:
+            combined.publication = "; ".join(pub_parts)
+        return combined
+
     # ------------------------------------------------------------------
     # Mutation / internal
     # ------------------------------------------------------------------
@@ -421,7 +470,7 @@ class RegressionTable:
         self._eqs[(eq.region.code, eq.aep)] = eq
 
     def add_equation(self, eq: GlsEquation) -> None:
-        """Public API to add or replace one :class:`GlsEquation`."""
+        """Add or replace one :class:`GlsEquation`."""
         self._add(eq)
         self._registry.register(eq.region)
 
@@ -437,7 +486,6 @@ class RegressionTable:
         ----------
         region : HydrologicRegion
         aep : float
-            Annual exceedance probability.
 
         Returns
         -------
@@ -449,15 +497,15 @@ class RegressionTable:
         """
         key = (region.code, aep)
         if key not in self._eqs:
-            available_for_region = sorted(a for r, a in self._eqs if r == region.code)
+            available = sorted(a for r, a in self._eqs if r == region.code)
             raise KeyError(
                 f"No equation for region={region.code!r}, AEP={aep}. "
-                f"Available AEPs for this region: {available_for_region}"
+                f"Available AEPs for this region: {available}"
             )
         return self._eqs[key]
 
     def get_by_region_code(self, region_code: str, aep: float) -> GlsEquation:
-        """Retrieve an equation by region code string (avoids needing the region object)."""
+        """Retrieve an equation by region code string."""
         key = (region_code, aep)
         if key not in self._eqs:
             raise KeyError(f"No equation for region_code={region_code!r}, AEP={aep}")
@@ -481,6 +529,10 @@ class RegressionTable:
         """Return sorted list of unique state abbreviations in the table."""
         return sorted({r.state for r in self.available_regions()})
 
+    def regions_for_state(self, state: str) -> List[HydrologicRegion]:
+        """Return all regions for a given state abbreviation."""
+        return [r for r in self.available_regions() if r.state == state]
+
     def get_variance(self, region: HydrologicRegion, aep: float) -> Optional[float]:
         """Return the prediction variance (log10 space) for an equation."""
         return self.get_equation(region, aep).variance_log10
@@ -503,8 +555,7 @@ class RegressionTable:
         float
             Peak flow in cfs.
         """
-        eq = self.get_equation(basin.region, aep)
-        return eq.compute(basin)
+        return self.get_equation(basin.region, aep).compute(basin)
 
     def estimate_all_aeps(self, basin: BasinCharacteristics) -> Dict[float, float]:
         """
@@ -527,6 +578,63 @@ class RegressionTable:
             except (KeyError, ValueError) as exc:
                 log.warning("Skipping AEP=%.4f for %s: %s", aep, basin.site_no, exc)
         return results
+
+    def batch_estimate(
+        self,
+        basins: Iterable[BasinCharacteristics],
+        aep: float,
+    ) -> Dict[str, float]:
+        """
+        Estimate peak flows for multiple basins at one AEP.
+
+        Basins may span multiple regions within this table.  Sites whose
+        region or predictor data are insufficient are silently skipped with
+        a warning logged.
+
+        Parameters
+        ----------
+        basins : iterable of BasinCharacteristics
+        aep : float
+
+        Returns
+        -------
+        dict
+            ``{site_no: peak_flow_cfs}`` for each successfully estimated site.
+
+        Examples
+        --------
+        ::
+
+            results = national_table.batch_estimate(site_list, aep=0.01)
+            # → {"03606500": 14730.0, "02330450": 8950.0, ...}
+        """
+        results: Dict[str, float] = {}
+        for basin in basins:
+            try:
+                results[basin.site_no] = self.estimate(basin, aep)
+            except (KeyError, ValueError) as exc:
+                log.warning("batch_estimate: skipping site %s: %s", basin.site_no, exc)
+        return results
+
+    def filter_by_state(self, state: str) -> "RegressionTable":
+        """
+        Return a new :class:`RegressionTable` containing only equations for *state*.
+
+        Parameters
+        ----------
+        state : str
+            Two-letter state abbreviation (e.g. ``"TN"``, ``"GA"``, ``"MT"``).
+
+        Returns
+        -------
+        RegressionTable
+        """
+        filtered = RegressionTable(publication=self.publication)
+        for (_, _), eq in self._eqs.items():
+            if eq.region.state == state:
+                filtered._add(eq)
+                filtered._registry.register(eq.region)
+        return filtered
 
     # ------------------------------------------------------------------
     # Output helpers
@@ -577,7 +685,6 @@ class RegressionTable:
             path.write_text("")
             return
 
-        # Collect all predictor codes across all equations
         all_pred_codes = sorted({code for eq in self._eqs.values() for code in eq.coefficients})
         fieldnames = (
             [
@@ -599,7 +706,6 @@ class RegressionTable:
             for (_, _), eq in sorted(self._eqs.items()):
                 row = eq.to_dict()
                 row["publication"] = self.publication
-                # Fill missing predictor codes with empty string
                 for code in all_pred_codes:
                     row.setdefault(code, "")
                 writer.writerow(row)
@@ -623,23 +729,11 @@ class RegressionTable:
         Parameters
         ----------
         path : str or Path
-            Output path.
         regions : list of HydrologicRegion
-            Regions to generate rows for.
         aeps : tuple of float
-            AEPs to generate rows for.
         extra_predictor_codes : list of str, optional
-            Additional predictor codes to include as columns beyond those
-            already listed in the regions' ``required_predictors``.
-
-        Notes
-        -----
-        Fill in ``intercept`` and each predictor coefficient column from the
-        source publication table.  Leave a coefficient cell blank if that
-        predictor is not used in a given region's equation.
         """
         path = Path(path)
-        # Collect all predictor codes needed
         pred_codes: List[str] = []
         for region in regions:
             for code in region.required_predictors:
@@ -669,7 +763,7 @@ class RegressionTable:
             writer.writeheader()
             for region in regions:
                 for aep in aeps:
-                    row = {
+                    row: Dict[str, object] = {
                         "region_code": region.code,
                         "region_label": region.label,
                         "state": region.state,
@@ -695,7 +789,7 @@ class RegressionTable:
     def __repr__(self) -> str:
         n_regions = len({r for r, _ in self._eqs})
         states = self.available_states()
-        return f"RegressionTable(equations={len(self)}, " f"regions={n_regions}, states={states})"
+        return f"RegressionTable(equations={len(self)}, regions={n_regions}, states={states})"
 
 
 # ---------------------------------------------------------------------------
@@ -709,7 +803,6 @@ def _region_from_row(row: Dict[str, str], registry: RegionRegistry) -> Hydrologi
     if code in registry:
         return registry[code]
 
-    # Build from the CSV row's optional metadata columns
     label = row.get("region_label", code).strip()
     state = row.get("state", "").strip()
     publication = row.get("publication", "").strip()
@@ -718,60 +811,11 @@ def _region_from_row(row: Dict[str, str], registry: RegionRegistry) -> Hydrologi
         code=code,
         label=label,
         state=state,
-        # required_predictors deliberately NOT derived from CSV predictor columns —
-        # those will be absent for some rows; the region definition should be
-        # explicit.  The user can pass a pre-populated registry if they need
-        # required_predictor enforcement.
+        # required_predictors not derived from CSV — provide a pre-populated
+        # registry if required-predictor enforcement is needed.
         required_predictors=(),
         publication=publication,
         notes=notes,
     )
     registry.register(region)
     return region
-
-
-def _dict_to_equation(region: HydrologicRegion, aep: float, kw: dict) -> GlsEquation:
-    """
-    Convert a user-supplied coefficient dict to a :class:`GlsEquation`.
-
-    Supports both the new-style dict::
-
-        {"intercept": 2.90, "coefficients": {"DRNAREA": 0.75, ...}}
-
-    and the legacy b0/b1/b2 style for backward compatibility with the old
-    ``SIR2024_5130.load_from_dict`` API::
-
-        {"b0": 2.90, "b1": 0.75, "b2": 0.38}
-
-    In the legacy case the predictor order follows the region's
-    ``required_predictors`` tuple.
-    """
-    if "intercept" in kw or "coefficients" in kw:
-        # New-style
-        return GlsEquation(
-            region=region,
-            aep=aep,
-            intercept=kw["intercept"],
-            coefficients=dict(kw.get("coefficients", {})),
-            sep_pct=kw.get("sep_pct"),
-            pseudo_r2=kw.get("pseudo_r2"),
-            eyr=kw.get("eyr"),
-        )
-    else:
-        # Legacy style: b0 = intercept, b1/b2 map to required_predictors in order
-        intercept = kw.get("b0", 0.0)
-        preds = list(region.required_predictors)
-        coefficients: Dict[str, float] = {}
-        for i, pred_code in enumerate(preds, start=1):
-            key = f"b{i}"
-            if key in kw and kw[key] is not None:
-                coefficients[pred_code] = float(kw[key])
-        return GlsEquation(
-            region=region,
-            aep=aep,
-            intercept=intercept,
-            coefficients=coefficients,
-            sep_pct=kw.get("sep_pct"),
-            pseudo_r2=kw.get("pseudo_r2"),
-            eyr=kw.get("eyr"),
-        )

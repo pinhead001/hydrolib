@@ -26,7 +26,7 @@ from hydrolib.regression.roi_analysis import (
     RoiSite,
     fetch_nwis_peak_data,
 )
-from hydrolib.regression.sir2024_5130 import TN_AREA2, TN_AREA3
+from hydrolib.regression.states.tennessee import TN_AREA2, TN_AREA3
 
 # ---------------------------------------------------------------------------
 # Shared fixtures

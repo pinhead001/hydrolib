@@ -1,22 +1,23 @@
 """
-Tests for the generic regression infrastructure:
-  hydrolib.regression.region          — HydrologicRegion, RegionRegistry
-  hydrolib.regression.basin_chars     — BasinCharacteristics
-  hydrolib.regression.regression_table — GlsEquation, RegressionTable
-  hydrolib.regression.sir2024_5130    — TN regions, HydrologicArea, SIR2024_5130
+Tests for the generic regression framework and the TN / GA / MT state modules.
 
-Synthetic (hypothetical) coefficients are used throughout so that
-computational logic can be verified without the actual SIR 2024-5130 PDF.
-Do NOT use these coefficients for engineering design.
+Coverage
+--------
+* HydrologicRegion — frozen, hashable, validate_predictors
+* RegionRegistry — register, lookup, load_from_csv
+* BasinCharacteristics — predictors dict API, state property, validation
+* GlsEquation — compute(), variance_log10, wrong-region guard
+* RegressionTable — load_from_dict, load_from_csv, batch_estimate, merge,
+  filter_by_state, regions_for_state
+* states.tennessee — build_tennessee_table(), region constants
+* states.georgia   — build_georgia_table(), region constants
+* states.montana   — build_montana_table(), region constants
+* Nationwide merge — three-state table, batch_estimate across states
 """
 
 from __future__ import annotations
 
-import csv
 import math
-import tempfile
-from pathlib import Path
-from typing import Dict, Tuple
 
 import pytest
 
@@ -24,7 +25,10 @@ from hydrolib.regression.basin_chars import (
     CSL1085LFP,
     DRNAREA,
     ELEV,
+    FOREST,
+    I2,
     IMPERV,
+    PRECIP,
     BasinCharacteristics,
 )
 from hydrolib.regression.region import HydrologicRegion, RegionRegistry
@@ -33,666 +37,664 @@ from hydrolib.regression.regression_table import (
     GlsEquation,
     RegressionTable,
 )
-from hydrolib.regression.sir2024_5130 import (
-    SIR2024_5130,
+from hydrolib.regression.states.georgia import (
+    GA_BLUE_RIDGE,
+    GA_COASTAL,
+    GA_PIEDMONT,
+    GA_REGIONS,
+    GA_VALLEY_RIDGE,
+    build_georgia_table,
+)
+from hydrolib.regression.states.montana import (
+    MT_FOOTHILLS,
+    MT_MOUNTAIN,
+    MT_PLAINS,
+    MT_REGIONS,
+    build_montana_table,
+)
+from hydrolib.regression.states.tennessee import (
     TN_AREA1,
     TN_AREA2,
     TN_AREA3,
     TN_AREA4,
     TN_REGIONS,
-    HydrologicArea,
+    build_tennessee_table,
 )
 
 # ---------------------------------------------------------------------------
-# Shared region fixtures (one TN, one KY, one multi-predictor)
+# Module-scoped fixtures (built once per test session for speed)
 # ---------------------------------------------------------------------------
 
-TN2 = TN_AREA2  # DA + slope
-TN3 = TN_AREA3  # DA only
 
-KY_REG1 = HydrologicRegion(
-    code="KY_REGION1",
-    label="Kentucky Flood Region 1",
-    state="KY",
-    required_predictors=(DRNAREA, CSL1085LFP),
-    publication="WRIR 03-4180",
-)
-
-GA_BLUE_RIDGE = HydrologicRegion(
-    code="GA_BLUE_RIDGE",
-    label="Georgia Blue Ridge",
-    state="GA",
-    required_predictors=(DRNAREA, ELEV),
-    publication="SIR 2017-5038",
-)
+@pytest.fixture(scope="module")
+def tn_table() -> RegressionTable:
+    return build_tennessee_table()
 
 
-def _make_tn2_basin(da: float = 100.0, slope: float = 5.0) -> BasinCharacteristics:
+@pytest.fixture(scope="module")
+def ga_table() -> RegressionTable:
+    return build_georgia_table()
+
+
+@pytest.fixture(scope="module")
+def mt_table() -> RegressionTable:
+    return build_montana_table()
+
+
+@pytest.fixture(scope="module")
+def national_table(tn_table, ga_table, mt_table) -> RegressionTable:
+    return RegressionTable.merge(tn_table, ga_table, mt_table)
+
+
+@pytest.fixture
+def tn2_basin() -> BasinCharacteristics:
     return BasinCharacteristics(
-        site_no="SITE01",
-        site_name="Test Creek TN",
-        region=TN2,
-        predictors={DRNAREA: da, CSL1085LFP: slope},
+        site_no="03606500",
+        site_name="Big Sandy River at Bruceton, TN",
+        region=TN_AREA2,
+        predictors={DRNAREA: 100.0, CSL1085LFP: 5.0},
     )
 
 
-def _make_ky_basin(da: float = 300.0, slope: float = 3.0) -> BasinCharacteristics:
+@pytest.fixture
+def ga_blue_ridge_basin() -> BasinCharacteristics:
     return BasinCharacteristics(
-        site_no="SITE_KY",
-        site_name="Test Creek KY",
-        region=KY_REG1,
-        predictors={DRNAREA: da, CSL1085LFP: slope},
-    )
-
-
-def _make_ga_basin(da: float = 80.0, elev: float = 2500.0) -> BasinCharacteristics:
-    return BasinCharacteristics(
-        site_no="SITE_GA",
-        site_name="Test Creek GA",
+        site_no="02333500",
+        site_name="Chattahoochee River near Helen, GA",
         region=GA_BLUE_RIDGE,
-        predictors={DRNAREA: da, ELEV: elev},
+        predictors={DRNAREA: 47.0, ELEV: 2650.0},
     )
 
 
-def _make_coeff_dict(
-    regions_and_preds: list,
-) -> Dict[Tuple[HydrologicRegion, float], dict]:
-    """
-    Build a synthetic coefficient dict for multiple regions across all 8 AEPs.
-
-    regions_and_preds: list of (region, predictor_codes)
-    """
-    b0_by_aep = {
-        0.5: 1.80,
-        0.2: 2.10,
-        0.1: 2.30,
-        0.04: 2.55,
-        0.02: 2.70,
-        0.01: 2.90,
-        0.005: 3.05,
-        0.002: 3.25,
-    }
-    result = {}
-    for region, pred_codes in regions_and_preds:
-        for aep, b0 in b0_by_aep.items():
-            coeffs = {code: 0.75 if i == 0 else 0.35 for i, code in enumerate(pred_codes)}
-            result[(region, aep)] = {
-                "intercept": b0,
-                "coefficients": coeffs,
-                "sep_pct": 36.0,
-                "pseudo_r2": 0.92,
-                "eyr": 18.0,
-            }
-    return result
+@pytest.fixture
+def mt_mountain_basin() -> BasinCharacteristics:
+    return BasinCharacteristics(
+        site_no="MT-UNGAGED",
+        site_name="Lost Horse Creek near Hamilton, MT",
+        region=MT_MOUNTAIN,
+        predictors={DRNAREA: 45.0, ELEV: 5800.0, PRECIP: 32.0},
+    )
 
 
 # ---------------------------------------------------------------------------
-# HydrologicRegion tests
+# HydrologicRegion
 # ---------------------------------------------------------------------------
 
 
 class TestHydrologicRegion:
     def test_frozen_and_hashable(self):
-        """Regions must be hashable (used as dict keys)."""
-        s = {TN2, TN3, KY_REG1}
-        assert len(s) == 3
+        r = HydrologicRegion("GA-1", "Blue Ridge", "GA", required_predictors=("DRNAREA", "ELEV"))
+        d = {r: "ok"}
+        assert d[r] == "ok"
 
-    def test_required_predictors_tuple(self):
-        assert isinstance(TN2.required_predictors, tuple)
-        assert DRNAREA in TN2.required_predictors
-        assert CSL1085LFP in TN2.required_predictors
+    def test_equality_by_fields(self):
+        r1 = HydrologicRegion("TN-2", "Middle TN", "TN", required_predictors=("DRNAREA",))
+        r2 = HydrologicRegion("TN-2", "Middle TN", "TN", required_predictors=("DRNAREA",))
+        assert r1 == r2
 
     def test_validate_predictors_ok(self):
-        TN2.validate_predictors({DRNAREA: 100.0, CSL1085LFP: 5.0})  # should not raise
+        TN_AREA2.validate_predictors({DRNAREA: 100.0, CSL1085LFP: 5.0})
 
-    def test_validate_predictors_missing(self):
-        with pytest.raises(ValueError, match="missing predictors"):
-            TN2.validate_predictors({DRNAREA: 100.0})  # missing slope
+    def test_validate_predictors_missing_raises(self):
+        with pytest.raises(ValueError, match="missing"):
+            TN_AREA2.validate_predictors({DRNAREA: 100.0})  # CSL1085LFP missing
 
-    def test_validate_predictors_nonpositive(self):
+    def test_validate_predictors_nonpositive_raises(self):
         with pytest.raises(ValueError, match="non-positive"):
-            TN2.validate_predictors({DRNAREA: 100.0, CSL1085LFP: 0.0})
+            TN_AREA2.validate_predictors({DRNAREA: 100.0, CSL1085LFP: -1.0})
+
+    def test_validate_three_predictor_region(self):
+        MT_MOUNTAIN.validate_predictors({DRNAREA: 45.0, ELEV: 5800.0, PRECIP: 32.0})
 
     def test_has_predictor(self):
-        assert TN2.has_predictor(CSL1085LFP)
-        assert not TN2.has_predictor(IMPERV)
+        assert GA_BLUE_RIDGE.has_predictor(ELEV)
+        assert not GA_BLUE_RIDGE.has_predictor(PRECIP)
 
     def test_from_dict_round_trip(self):
-        d = TN2.to_dict()
-        r2 = HydrologicRegion.from_dict(d)
-        assert r2.code == TN2.code
-        assert r2.state == TN2.state
-        assert set(r2.required_predictors) == set(TN2.required_predictors)
+        original = TN_AREA3
+        restored = HydrologicRegion.from_dict(original.to_dict())
+        assert restored.code == original.code
+        assert restored.state == original.state
+        assert set(restored.required_predictors) == set(original.required_predictors)
 
-    def test_str(self):
-        assert "TN_AREA2" in str(TN2)
+    def test_str_contains_code_and_state(self):
+        s = str(TN_AREA2)
+        assert "TN-2" in s
+        assert "TN" in s
 
-    def test_area3_da_only(self):
-        assert TN_AREA3.required_predictors == (DRNAREA,)
-
-    def test_tn_regions_tuple(self):
+    def test_tn_regions_length(self):
         assert len(TN_REGIONS) == 4
-        assert TN_AREA1 in TN_REGIONS
+
+    def test_ga_regions_length(self):
+        assert len(GA_REGIONS) == 4
+
+    def test_mt_regions_length(self):
+        assert len(MT_REGIONS) == 3
+
+    def test_region_codes_unique_across_states(self):
+        all_codes = [r.code for r in TN_REGIONS + GA_REGIONS + MT_REGIONS]
+        assert len(all_codes) == len(set(all_codes))
+
+
+# ---------------------------------------------------------------------------
+# RegionRegistry
+# ---------------------------------------------------------------------------
 
 
 class TestRegionRegistry:
-    def test_register_and_get(self):
+    def test_register_and_lookup(self):
         reg = RegionRegistry()
-        reg.register(KY_REG1)
-        assert reg["KY_REGION1"] is KY_REG1
+        reg.register(TN_AREA2)
+        assert reg["TN-2"] is TN_AREA2
 
     def test_contains(self):
         reg = RegionRegistry()
-        reg.register(TN2)
-        assert "TN_AREA2" in reg
-        assert "TN_AREA1" not in reg
+        reg.register(GA_BLUE_RIDGE)
+        assert "GA-1" in reg
+        assert "XX-99" not in reg
 
     def test_missing_key_raises(self):
         reg = RegionRegistry()
         with pytest.raises(KeyError):
             _ = reg["NONEXISTENT"]
 
-    def test_all_regions(self):
+    def test_all_regions_returns_list(self):
         reg = RegionRegistry()
-        for r in [TN2, TN3, KY_REG1]:
+        for r in TN_REGIONS:
             reg.register(r)
-        assert len(reg.all_regions()) == 3
+        assert len(reg.all_regions()) == 4
 
-    def test_load_from_csv(self):
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="") as fh:
-            tmp = fh.name
-            writer = csv.DictWriter(
-                fh, fieldnames=["code", "label", "state", "required_predictors", "publication"]
-            )
-            writer.writeheader()
-            writer.writerow(
-                {
-                    "code": "OR_COAST",
-                    "label": "Oregon Coast Range",
-                    "state": "OR",
-                    "required_predictors": "DRNAREA, PRECIP",
-                    "publication": "SIR 2014-5048",
-                }
-            )
-
-        reg = RegionRegistry.load_from_csv(tmp)
-        Path(tmp).unlink()
-        assert "OR_COAST" in reg
-        r = reg["OR_COAST"]
-        assert "DRNAREA" in r.required_predictors
-        assert "PRECIP" in r.required_predictors
+    def test_load_from_csv(self, tmp_path):
+        csv_path = tmp_path / "regions.csv"
+        csv_path.write_text(
+            "code,label,state,required_predictors\n"
+            "GA-1,Blue Ridge,GA,DRNAREA ELEV\n"
+            "MT-1,Mountain,MT,DRNAREA ELEV PRECIP\n"
+        )
+        reg = RegionRegistry.load_from_csv(csv_path)
+        assert "GA-1" in reg
+        assert "MT-1" in reg
 
 
 # ---------------------------------------------------------------------------
-# BasinCharacteristics tests
+# BasinCharacteristics
 # ---------------------------------------------------------------------------
 
 
 class TestBasinCharacteristics:
-    def test_valid_tn2(self):
-        b = _make_tn2_basin()
-        assert b.drainage_area_sqmi == 100.0
-        assert b.slope_1085_ftmi == 5.0
-        assert b.region is TN2
+    def test_tn2_valid(self, tn2_basin):
+        assert tn2_basin.site_no == "03606500"
+        assert tn2_basin.predictors[DRNAREA] == 100.0
+        assert tn2_basin.predictors[CSL1085LFP] == 5.0
 
-    def test_valid_ky(self):
-        b = _make_ky_basin()
-        assert b.drainage_area_sqmi == 300.0
+    def test_ga_blue_ridge_valid(self, ga_blue_ridge_basin):
+        assert ga_blue_ridge_basin.predictors[ELEV] == 2650.0
+        assert PRECIP not in ga_blue_ridge_basin.predictors
 
-    def test_valid_ga_with_elev(self):
-        b = _make_ga_basin()
-        assert b.predictors[ELEV] == 2500.0
+    def test_mt_mountain_three_predictors(self, mt_mountain_basin):
+        assert mt_mountain_basin.predictors[ELEV] == 5800.0
+        assert mt_mountain_basin.predictors[PRECIP] == 32.0
+
+    def test_ga_coastal_requires_precip(self):
+        basin = BasinCharacteristics(
+            site_no="X",
+            site_name="X",
+            region=GA_COASTAL,
+            predictors={DRNAREA: 200.0, PRECIP: 50.0},
+        )
+        assert basin.predictors[PRECIP] == 50.0
 
     def test_missing_required_raises(self):
-        with pytest.raises(ValueError, match="missing predictors"):
+        with pytest.raises(ValueError, match="missing"):
             BasinCharacteristics(
                 site_no="X",
                 site_name="X",
-                region=TN2,
-                predictors={DRNAREA: 100.0},  # missing CSL1085LFP
+                region=MT_MOUNTAIN,
+                predictors={DRNAREA: 45.0, ELEV: 5800.0},  # PRECIP missing
             )
 
-    def test_zero_predictor_raises(self):
+    def test_nonpositive_predictor_raises(self):
         with pytest.raises(ValueError, match="non-positive"):
             BasinCharacteristics(
                 site_no="X",
                 site_name="X",
-                region=TN3,
-                predictors={DRNAREA: 0.0},
+                region=TN_AREA2,
+                predictors={DRNAREA: 0.0, CSL1085LFP: 5.0},
             )
 
-    def test_convenience_properties_none_when_absent(self):
-        b = _make_tn2_basin()
-        assert b.climate_factor_2yr is None  # I2 not in predictors
-        assert b.pct_impervious is None
+    def test_state_property_from_region(self, tn2_basin):
+        assert tn2_basin.state == "TN"
 
-    def test_state_from_region(self):
-        b = _make_tn2_basin()
-        assert b.state == "TN"
-        b_ky = _make_ky_basin()
-        assert b_ky.state == "KY"
+    def test_predictor_value_ok(self, ga_blue_ridge_basin):
+        assert ga_blue_ridge_basin.predictor_value(ELEV) == 2650.0
 
-    def test_predictor_value_ok(self):
-        b = _make_tn2_basin(da=250.0, slope=3.5)
-        assert b.predictor_value(DRNAREA) == 250.0
-
-    def test_predictor_value_missing_raises(self):
-        b = _make_tn2_basin()
+    def test_predictor_value_missing_raises(self, ga_blue_ridge_basin):
         with pytest.raises(KeyError):
-            b.predictor_value(ELEV)
+            ga_blue_ridge_basin.predictor_value(PRECIP)
 
     def test_extra_predictors_stored(self):
-        """Extra predictors beyond required_predictors are preserved."""
-        b = BasinCharacteristics(
+        basin = BasinCharacteristics(
             site_no="X",
             site_name="X",
-            region=TN2,
-            predictors={DRNAREA: 100.0, CSL1085LFP: 5.0, ELEV: 1200.0},
+            region=TN_AREA3,
+            predictors={DRNAREA: 50.0, FOREST: 65.0},
         )
-        assert b.predictors[ELEV] == 1200.0
+        assert basin.predictors[FOREST] == 65.0
 
-    def test_from_streamstats_valid(self):
-        params = {DRNAREA: 85.3, CSL1085LFP: 4.7, ELEV: 980.0}
-        b = BasinCharacteristics.from_streamstats(
-            "SS01", "SS Site", TN2, params, latitude=36.0, longitude=-86.5
-        )
-        assert b.drainage_area_sqmi == 85.3
-        assert b.slope_1085_ftmi == 4.7
-        assert b.latitude == 36.0
-
-    def test_from_streamstats_skips_nonnumeric(self):
-        params = {DRNAREA: 100.0, CSL1085LFP: 5.0, "DESCRIPTION": "some text"}
-        b = BasinCharacteristics.from_streamstats("X", "X", TN2, params)
-        assert "DESCRIPTION" not in b.predictors
+    def test_from_streamstats_filters_nonnumeric(self):
+        params = {DRNAREA: 100.0, CSL1085LFP: 5.0, "STATION_ID": "non-numeric"}
+        basin = BasinCharacteristics.from_streamstats("TEST", "Test", TN_AREA2, params)
+        assert DRNAREA in basin.predictors
+        assert "STATION_ID" not in basin.predictors
 
     def test_from_streamstats_missing_required_raises(self):
         with pytest.raises(ValueError):
-            BasinCharacteristics.from_streamstats("X", "X", TN2, {DRNAREA: 100.0})
+            BasinCharacteristics.from_streamstats(
+                "X", "X", GA_BLUE_RIDGE, {DRNAREA: 100.0}  # ELEV missing
+            )
 
-    def test_summary_contains_site_and_region(self):
-        s = _make_tn2_basin().summary()
-        assert "SITE01" in s
-        assert "TN_AREA2" in s
+    def test_summary_contains_state_and_predictors(self, tn2_basin):
+        s = tn2_basin.summary()
+        assert "TN" in s
+        assert DRNAREA in s
+
+    def test_no_slope_convenience_property(self, tn2_basin):
+        assert not hasattr(tn2_basin, "slope_1085_ftmi")
+
+    def test_no_drainage_area_convenience_property(self, tn2_basin):
+        assert not hasattr(tn2_basin, "drainage_area_sqmi")
 
 
 # ---------------------------------------------------------------------------
-# GlsEquation tests
+# GlsEquation
 # ---------------------------------------------------------------------------
 
 
 class TestGlsEquation:
-    def test_compute_two_predictors(self):
+    def test_compute_tn2_q100(self, tn2_basin):
         eq = GlsEquation(
-            region=TN2,
+            region=TN_AREA2,
             aep=0.01,
-            intercept=2.90,
+            intercept=2.69,
             coefficients={DRNAREA: 0.75, CSL1085LFP: 0.38},
+            sep_pct=35.0,
         )
-        b = _make_tn2_basin(da=779.0, slope=2.4)
-        expected_log = 2.90 + 0.75 * math.log10(779.0) + 0.38 * math.log10(2.4)
-        assert math.isclose(math.log10(eq.compute(b)), expected_log, rel_tol=1e-9)
+        q = eq.compute(tn2_basin)
+        expected_log = 2.69 + 0.75 * math.log10(100) + 0.38 * math.log10(5)
+        assert math.isclose(math.log10(q), expected_log, rel_tol=1e-9)
 
-    def test_compute_da_only(self):
-        eq = GlsEquation(
-            region=TN3,
-            aep=0.01,
-            intercept=2.85,
-            coefficients={DRNAREA: 0.72},
-        )
-        b = BasinCharacteristics(
-            site_no="X",
-            site_name="X",
-            region=TN3,
-            predictors={DRNAREA: 120.5},
-        )
-        expected_log = 2.85 + 0.72 * math.log10(120.5)
-        assert math.isclose(math.log10(eq.compute(b)), expected_log, rel_tol=1e-9)
-
-    def test_compute_three_predictors(self):
-        """Arbitrary predictor set (GA Blue Ridge: DA + ELEV)."""
+    def test_compute_ga_blue_ridge(self, ga_blue_ridge_basin):
         eq = GlsEquation(
             region=GA_BLUE_RIDGE,
             aep=0.01,
-            intercept=1.50,
-            coefficients={DRNAREA: 0.80, ELEV: 0.25},
+            intercept=1.14,
+            coefficients={DRNAREA: 0.82, ELEV: 0.35},
         )
-        b = _make_ga_basin(da=80.0, elev=2500.0)
-        expected_log = 1.50 + 0.80 * math.log10(80.0) + 0.25 * math.log10(2500.0)
-        assert math.isclose(math.log10(eq.compute(b)), expected_log, rel_tol=1e-9)
+        q = eq.compute(ga_blue_ridge_basin)
+        expected_log = 1.14 + 0.82 * math.log10(47) + 0.35 * math.log10(2650)
+        assert math.isclose(math.log10(q), expected_log, rel_tol=1e-9)
 
-    def test_wrong_region_raises(self):
-        eq = GlsEquation(region=TN3, aep=0.01, intercept=2.9, coefficients={DRNAREA: 0.75})
-        with pytest.raises(ValueError, match="region"):
-            eq.compute(_make_tn2_basin())  # TN2 basin, TN3 equation
-
-    def test_missing_predictor_raises(self):
+    def test_compute_mt_three_predictors(self, mt_mountain_basin):
         eq = GlsEquation(
-            region=TN2,
+            region=MT_MOUNTAIN,
             aep=0.01,
-            intercept=2.90,
-            coefficients={DRNAREA: 0.75, CSL1085LFP: 0.38},
+            intercept=-0.61,
+            coefficients={DRNAREA: 0.76, ELEV: 0.48, PRECIP: 0.62},
         )
-        # Build a basin that bypasses validation (empty predictors would fail)
-        # Instead, force a missing predictor at compute time
-        b = BasinCharacteristics(
-            site_no="X",
-            site_name="X",
-            region=TN2,
-            predictors={DRNAREA: 100.0, CSL1085LFP: 5.0},
+        q = eq.compute(mt_mountain_basin)
+        expected_log = (
+            -0.61 + 0.76 * math.log10(45.0) + 0.48 * math.log10(5800.0) + 0.62 * math.log10(32.0)
         )
-        # Monkey-patch to remove slope after construction
-        b.predictors.pop(CSL1085LFP)
-        with pytest.raises(KeyError):
-            eq.compute(b)
+        assert math.isclose(math.log10(q), expected_log, rel_tol=1e-9)
 
-    def test_return_period(self):
-        eq = GlsEquation(region=TN3, aep=0.01, intercept=2.0, coefficients={})
-        assert math.isclose(eq.return_period, 100.0)
+    def test_compute_da_only_mt_plains(self):
+        basin = BasinCharacteristics(
+            site_no="X", site_name="X", region=MT_PLAINS, predictors={DRNAREA: 100.0}
+        )
+        eq = GlsEquation(region=MT_PLAINS, aep=0.01, intercept=1.48, coefficients={DRNAREA: 0.71})
+        q = eq.compute(basin)
+        expected = 10 ** (1.48 + 0.71 * math.log10(100.0))
+        assert math.isclose(q, expected, rel_tol=1e-9)
+
+    def test_wrong_region_raises(self, tn2_basin):
+        eq = GlsEquation(region=TN_AREA3, aep=0.01, intercept=2.62, coefficients={DRNAREA: 0.78})
+        with pytest.raises(ValueError, match="region"):
+            eq.compute(tn2_basin)
 
     def test_variance_log10_from_sep(self):
-        eq = GlsEquation(region=TN3, aep=0.01, intercept=2.0, coefficients={}, sep_pct=40.0)
-        expected = (math.log10(1.4)) ** 2
-        assert math.isclose(eq.variance_log10, expected, rel_tol=1e-9)
+        eq = GlsEquation(
+            region=TN_AREA2,
+            aep=0.01,
+            intercept=2.69,
+            coefficients={DRNAREA: 0.75, CSL1085LFP: 0.38},
+            sep_pct=35.0,
+        )
+        assert math.isclose(eq.variance_log10, (math.log10(1.35)) ** 2, rel_tol=1e-9)
 
     def test_variance_none_without_sep(self):
-        eq = GlsEquation(region=TN3, aep=0.01, intercept=2.0, coefficients={})
+        eq = GlsEquation(region=MT_PLAINS, aep=0.01, intercept=1.48, coefficients={DRNAREA: 0.71})
         assert eq.variance_log10 is None
+
+    def test_return_period(self):
+        eq = GlsEquation(region=TN_AREA3, aep=0.01, intercept=2.62, coefficients={DRNAREA: 0.78})
+        assert eq.return_period == pytest.approx(100.0)
 
     def test_predictor_codes_sorted(self):
         eq = GlsEquation(
-            region=TN2, aep=0.01, intercept=2.0, coefficients={CSL1085LFP: 0.38, DRNAREA: 0.75}
+            region=MT_MOUNTAIN,
+            aep=0.01,
+            intercept=-0.61,
+            coefficients={DRNAREA: 0.76, ELEV: 0.48, PRECIP: 0.62},
         )
-        assert eq.predictor_codes == sorted([DRNAREA, CSL1085LFP])
+        assert eq.predictor_codes == sorted([DRNAREA, ELEV, PRECIP])
 
-    def test_to_dict_has_region_and_aep(self):
+    def test_to_dict_has_region_code_and_aep(self):
         eq = GlsEquation(
-            region=TN2, aep=0.01, intercept=2.90, coefficients={DRNAREA: 0.75, CSL1085LFP: 0.38}
+            region=GA_PIEDMONT,
+            aep=0.01,
+            intercept=2.65,
+            coefficients={DRNAREA: 0.77},
+            sep_pct=44.0,
         )
         d = eq.to_dict()
-        assert d["region_code"] == "TN_AREA2"
+        assert d["region_code"] == "GA-3"
         assert d["aep"] == 0.01
-        assert d["intercept"] == 2.90
-        assert d[DRNAREA] == 0.75
+        assert d[DRNAREA] == 0.77
 
 
 # ---------------------------------------------------------------------------
-# RegressionTable — generic tests (multi-state)
+# Tennessee table
 # ---------------------------------------------------------------------------
 
 
-class TestRegressionTableGeneric:
-    @pytest.fixture
-    def multi_state_table(self) -> RegressionTable:
-        """Table spanning TN (Area2, Area3), KY, GA regions."""
-        coeff_dict = _make_coeff_dict(
-            [
-                (TN2, [DRNAREA, CSL1085LFP]),
-                (TN3, [DRNAREA]),
-                (KY_REG1, [DRNAREA, CSL1085LFP]),
-                (GA_BLUE_RIDGE, [DRNAREA, ELEV]),
-            ]
+class TestTennesseeTable:
+    def test_equation_count(self, tn_table):
+        assert len(tn_table) == 4 * 8
+
+    def test_available_states(self, tn_table):
+        assert tn_table.available_states() == ["TN"]
+
+    def test_available_region_codes(self, tn_table):
+        codes = {r.code for r in tn_table.available_regions()}
+        assert codes == {"TN-1", "TN-2", "TN-3", "TN-4"}
+
+    def test_area2_estimate_positive(self, tn_table, tn2_basin):
+        assert tn_table.estimate(tn2_basin, aep=0.01) > 0
+
+    def test_area2_monotonic_with_return_period(self, tn_table, tn2_basin):
+        qs = tn_table.estimate_all_aeps(tn2_basin)
+        sorted_aeps = sorted(qs.keys(), reverse=True)
+        flows = [qs[a] for a in sorted_aeps]
+        assert all(flows[i] <= flows[i + 1] for i in range(len(flows) - 1))
+
+    def test_area3_da_only(self, tn_table):
+        basin = BasinCharacteristics(
+            site_no="X", site_name="X", region=TN_AREA3, predictors={DRNAREA: 50.0}
         )
-        return RegressionTable.load_from_dict(coeff_dict)
+        assert tn_table.estimate(basin, aep=0.01) > 0
 
-    def test_available_states(self, multi_state_table):
-        states = multi_state_table.available_states()
-        assert "TN" in states
-        assert "KY" in states
-        assert "GA" in states
+    def test_area1_i2_predictor(self, tn_table):
+        basin = BasinCharacteristics(
+            site_no="X",
+            site_name="X",
+            region=TN_AREA1,
+            predictors={DRNAREA: 80.0, I2: 2.5},
+        )
+        assert tn_table.estimate(basin, aep=0.01) > 0
 
-    def test_available_regions(self, multi_state_table):
-        regions = multi_state_table.available_regions()
-        codes = {r.code for r in regions}
-        assert "TN_AREA2" in codes
-        assert "KY_REGION1" in codes
-        assert "GA_BLUE_RIDGE" in codes
+    def test_area4_imperv_predictor(self, tn_table):
+        basin = BasinCharacteristics(
+            site_no="X",
+            site_name="X",
+            region=TN_AREA4,
+            predictors={DRNAREA: 60.0, IMPERV: 5.0},
+        )
+        assert tn_table.estimate(basin, aep=0.01) > 0
 
-    def test_estimate_tn2(self, multi_state_table):
-        b = _make_tn2_basin()
-        q = multi_state_table.estimate(b, aep=0.01)
-        assert q > 0
+    def test_sep_pct_populated(self, tn_table):
+        eq = tn_table.get_equation(TN_AREA2, 0.01)
+        assert eq.sep_pct is not None and eq.sep_pct > 0
 
-    def test_estimate_ky(self, multi_state_table):
-        b = _make_ky_basin()
-        q = multi_state_table.estimate(b, aep=0.01)
-        assert q > 0
+    def test_summary_table_length(self, tn_table, tn2_basin):
+        rows = tn_table.summary_table(tn2_basin)
+        assert len(rows) == len(STANDARD_AEPS)
+        assert all(r["flow_cfs"] > 0 for r in rows)
 
-    def test_estimate_ga_with_elev(self, multi_state_table):
-        b = _make_ga_basin()
-        q = multi_state_table.estimate(b, aep=0.01)
-        assert q > 0
+    def test_publication_set(self, tn_table):
+        assert "2024" in tn_table.publication or "SIR" in tn_table.publication
 
-    def test_estimate_all_aeps_count(self, multi_state_table):
-        b = _make_tn2_basin()
-        results = multi_state_table.estimate_all_aeps(b)
-        assert len(results) == 8
+
+# ---------------------------------------------------------------------------
+# Georgia table
+# ---------------------------------------------------------------------------
+
+
+class TestGeorgiaTable:
+    def test_equation_count(self, ga_table):
+        assert len(ga_table) == 4 * 8
+
+    def test_available_states(self, ga_table):
+        assert ga_table.available_states() == ["GA"]
+
+    def test_blue_ridge_has_elev_not_precip(self, ga_table):
+        eq = ga_table.get_equation(GA_BLUE_RIDGE, 0.01)
+        assert ELEV in eq.coefficients
+        assert PRECIP not in eq.coefficients
+
+    def test_coastal_has_precip_not_elev(self, ga_table):
+        eq = ga_table.get_equation(GA_COASTAL, 0.01)
+        assert PRECIP in eq.coefficients
+        assert ELEV not in eq.coefficients
+
+    def test_valley_ridge_has_slope(self, ga_table):
+        eq = ga_table.get_equation(GA_VALLEY_RIDGE, 0.01)
+        assert CSL1085LFP in eq.coefficients
+
+    def test_piedmont_da_only(self, ga_table):
+        eq = ga_table.get_equation(GA_PIEDMONT, 0.01)
+        assert list(eq.coefficients.keys()) == [DRNAREA]
+
+    def test_blue_ridge_estimate(self, ga_table, ga_blue_ridge_basin):
+        assert ga_table.estimate(ga_blue_ridge_basin, aep=0.01) > 0
+
+    def test_all_ga_regions_monotonic(self, ga_table):
+        basins = [
+            BasinCharacteristics("A", "A", GA_BLUE_RIDGE, {DRNAREA: 50.0, ELEV: 2500.0}),
+            BasinCharacteristics("B", "B", GA_VALLEY_RIDGE, {DRNAREA: 80.0, CSL1085LFP: 6.0}),
+            BasinCharacteristics("C", "C", GA_PIEDMONT, {DRNAREA: 100.0}),
+            BasinCharacteristics("D", "D", GA_COASTAL, {DRNAREA: 200.0, PRECIP: 52.0}),
+        ]
+        for basin in basins:
+            qs = ga_table.estimate_all_aeps(basin)
+            sorted_aeps = sorted(qs.keys(), reverse=True)
+            flows = [qs[a] for a in sorted_aeps]
+            assert all(
+                flows[i] <= flows[i + 1] for i in range(len(flows) - 1)
+            ), f"Non-monotonic flows for {basin.site_no}"
+
+
+# ---------------------------------------------------------------------------
+# Montana table
+# ---------------------------------------------------------------------------
+
+
+class TestMontanaTable:
+    def test_equation_count(self, mt_table):
+        assert len(mt_table) == 3 * 8
+
+    def test_available_states(self, mt_table):
+        assert mt_table.available_states() == ["MT"]
+
+    def test_mountain_three_predictors(self, mt_table):
+        eq = mt_table.get_equation(MT_MOUNTAIN, 0.01)
+        assert set(eq.coefficients.keys()) == {DRNAREA, ELEV, PRECIP}
+
+    def test_foothills_two_predictors(self, mt_table):
+        eq = mt_table.get_equation(MT_FOOTHILLS, 0.01)
+        assert set(eq.coefficients.keys()) == {DRNAREA, CSL1085LFP}
+
+    def test_plains_one_predictor(self, mt_table):
+        eq = mt_table.get_equation(MT_PLAINS, 0.01)
+        assert list(eq.coefficients.keys()) == [DRNAREA]
+
+    def test_mountain_estimate_positive(self, mt_table, mt_mountain_basin):
+        assert mt_table.estimate(mt_mountain_basin, aep=0.01) > 0
+
+    def test_mountain_q100_greater_than_q2(self, mt_table, mt_mountain_basin):
+        assert mt_table.estimate(mt_mountain_basin, aep=0.01) > mt_table.estimate(
+            mt_mountain_basin, aep=0.5
+        )
+
+    def test_plains_estimate_positive(self, mt_table):
+        basin = BasinCharacteristics(
+            site_no="X", site_name="X", region=MT_PLAINS, predictors={DRNAREA: 500.0}
+        )
+        assert mt_table.estimate(basin, aep=0.01) > 0
+
+    def test_plains_higher_sep_than_mountain(self, mt_table):
+        eq_mtn = mt_table.get_equation(MT_MOUNTAIN, 0.01)
+        eq_plains = mt_table.get_equation(MT_PLAINS, 0.01)
+        assert eq_plains.sep_pct > eq_mtn.sep_pct
+
+
+# ---------------------------------------------------------------------------
+# Nationwide / multi-state
+# ---------------------------------------------------------------------------
+
+
+class TestNationwideTable:
+    def test_states(self, national_table):
+        assert set(national_table.available_states()) == {"TN", "GA", "MT"}
+
+    def test_equation_count(self, national_table):
+        # (4 TN + 4 GA + 3 MT) × 8 AEPs = 88
+        assert len(national_table) == 88
+
+    def test_regions_for_state_tn(self, national_table):
+        regs = national_table.regions_for_state("TN")
+        assert len(regs) == 4
+        assert all(r.state == "TN" for r in regs)
+
+    def test_regions_for_state_mt(self, national_table):
+        regs = national_table.regions_for_state("MT")
+        assert len(regs) == 3
+
+    def test_filter_by_state_tn(self, national_table):
+        tn_only = national_table.filter_by_state("TN")
+        assert tn_only.available_states() == ["TN"]
+        assert len(tn_only) == 32
+
+    def test_filter_by_state_ga(self, national_table):
+        ga_only = national_table.filter_by_state("GA")
+        assert ga_only.available_states() == ["GA"]
+        assert len(ga_only) == 32
+
+    def test_batch_estimate_three_states(
+        self, national_table, tn2_basin, ga_blue_ridge_basin, mt_mountain_basin
+    ):
+        results = national_table.batch_estimate(
+            [tn2_basin, ga_blue_ridge_basin, mt_mountain_basin], aep=0.01
+        )
+        assert set(results.keys()) == {"03606500", "02333500", "MT-UNGAGED"}
         assert all(q > 0 for q in results.values())
 
-    def test_missing_region_raises(self, multi_state_table):
-        unknown = HydrologicRegion("ZZ_X", "Unknown", "ZZ", required_predictors=(DRNAREA,))
-        b = BasinCharacteristics(
-            site_no="X", site_name="X", region=unknown, predictors={DRNAREA: 100.0}
+    def test_batch_estimate_skips_unknown_region(self, national_table, tn2_basin):
+        unknown_region = HydrologicRegion(
+            "XX-99", "Unknown", "XX", required_predictors=("DRNAREA",)
         )
-        with pytest.raises(KeyError):
-            multi_state_table.estimate(b, aep=0.01)
+        unknown_basin = BasinCharacteristics(
+            site_no="UNK",
+            site_name="Unknown",
+            region=unknown_region,
+            predictors={DRNAREA: 100.0},
+        )
+        results = national_table.batch_estimate([tn2_basin, unknown_basin], aep=0.01)
+        assert "03606500" in results
+        assert "UNK" not in results
 
-    def test_missing_aep_raises(self, multi_state_table):
-        b = _make_tn2_basin()
-        with pytest.raises(KeyError):
-            multi_state_table.get_equation(TN2, 0.333)
+    def test_get_by_region_code(self, national_table):
+        eq_tn = national_table.get_by_region_code("TN-2", 0.01)
+        assert eq_tn.region.state == "TN"
+        eq_ga = national_table.get_by_region_code("GA-1", 0.01)
+        assert eq_ga.region.state == "GA"
+        eq_mt = national_table.get_by_region_code("MT-1", 0.01)
+        assert eq_mt.region.state == "MT"
 
-    def test_repr(self, multi_state_table):
-        r = repr(multi_state_table)
-        assert "RegressionTable" in r
-        assert "TN" in r
+    def test_repr(self, national_table):
+        r = repr(national_table)
+        assert "88" in r
+        assert "GA" in r or "TN" in r
 
-    def test_len(self, multi_state_table):
-        # 4 regions × 8 AEPs = 32
-        assert len(multi_state_table) == 32
 
-    # ------------------------------------------------------------------
-    # CSV round-trip
-    # ------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# CSV round-trip
+# ---------------------------------------------------------------------------
 
-    def test_csv_round_trip(self, multi_state_table):
-        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as fh:
-            tmp = fh.name
 
-        multi_state_table.to_csv(tmp)
-        loaded = RegressionTable.load_from_csv(tmp)
-        Path(tmp).unlink()
+class TestCSVRoundTrip:
+    def test_round_trip_tn(self, tn_table, tmp_path):
+        p = tmp_path / "tn.csv"
+        tn_table.to_csv(p)
+        loaded = RegressionTable.load_from_csv(p)
+        assert len(loaded) == len(tn_table)
 
-        assert len(loaded) == len(multi_state_table)
-        eq_orig = multi_state_table.get_equation(TN2, 0.01)
-        eq_load = loaded.get_by_region_code("TN_AREA2", 0.01)
-        assert math.isclose(eq_orig.intercept, eq_load.intercept)
-        assert math.isclose(eq_orig.coefficients[DRNAREA], eq_load.coefficients[DRNAREA])
+    def test_multi_state_predictor_isolation(self, tmp_path):
+        """In a merged GA+MT CSV, each region row only has its own predictor."""
+        merged = RegressionTable.merge(build_georgia_table(), build_montana_table())
+        p = tmp_path / "ga_mt.csv"
+        merged.to_csv(p)
+        loaded = RegressionTable.load_from_csv(p)
+        # GA Blue Ridge: ELEV present, CSL1085LFP absent
+        eq_ga = loaded.get_by_region_code("GA-1", 0.01)
+        assert ELEV in eq_ga.coefficients
+        assert CSL1085LFP not in eq_ga.coefficients
+        # MT Foothills: CSL1085LFP present, ELEV absent (ELEV is in Mountain rows)
+        eq_fh = loaded.get_by_region_code("MT-2", 0.01)
+        assert CSL1085LFP in eq_fh.coefficients
 
-    def test_csv_round_trip_multi_predictor(self, multi_state_table):
-        """GA equations use ELEV not CSL1085LFP — verify no cross-contamination."""
-        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as fh:
-            tmp = fh.name
+    def test_mt_mountain_three_predictors_survive_csv(self, mt_table, tmp_path):
+        p = tmp_path / "mt.csv"
+        mt_table.to_csv(p)
+        loaded = RegressionTable.load_from_csv(p)
+        eq = loaded.get_by_region_code("MT-1", 0.01)
+        assert set(eq.coefficients.keys()) == {DRNAREA, ELEV, PRECIP}
 
-        multi_state_table.to_csv(tmp)
-        loaded = RegressionTable.load_from_csv(tmp)
-        Path(tmp).unlink()
-
-        eq = loaded.get_by_region_code("GA_BLUE_RIDGE", 0.01)
-        assert ELEV in eq.coefficients
-        # KY equation should not have ELEV
-        eq_ky = loaded.get_by_region_code("KY_REGION1", 0.01)
-        assert ELEV not in eq_ky.coefficients
-
-    def test_load_from_csv_file_not_found(self):
+    def test_file_not_found_raises(self):
         with pytest.raises(FileNotFoundError):
-            RegressionTable.load_from_csv("/nonexistent/equations.csv")
+            RegressionTable.load_from_csv("/nonexistent/path/equations.csv")
 
-    # ------------------------------------------------------------------
-    # write_template helper
-    # ------------------------------------------------------------------
+    def test_write_template_all_three_states(self, tmp_path):
+        p = tmp_path / "template.csv"
+        all_regions = list(TN_REGIONS) + list(GA_REGIONS) + list(MT_REGIONS)
+        RegressionTable.write_template(p, all_regions)
+        text = p.read_text()
+        assert "TN-1" in text
+        assert "GA-1" in text
+        assert "MT-1" in text
+        data_lines = [l for l in text.splitlines()[1:] if l]
+        assert len(data_lines) == len(all_regions) * len(STANDARD_AEPS)
 
-    def test_write_template_row_count(self):
-        regions = [TN2, TN3, KY_REG1]
-        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as fh:
-            tmp = fh.name
-        RegressionTable.write_template(tmp, regions=regions)
-        content = Path(tmp).read_text()
-        Path(tmp).unlink()
-        lines = [l for l in content.splitlines() if l.strip()]
-        # header + 3 regions × 8 AEPs = 25
-        assert len(lines) == 25
-
-    def test_write_template_has_predictor_columns(self):
-        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as fh:
-            tmp = fh.name
-        RegressionTable.write_template(tmp, regions=[TN2, GA_BLUE_RIDGE])
-        header = Path(tmp).read_text().splitlines()[0]
-        Path(tmp).unlink()
-        assert DRNAREA in header
-        assert CSL1085LFP in header
-        assert ELEV in header
-
-
-# ---------------------------------------------------------------------------
-# SIR2024_5130 and HydrologicArea (backward-compat) tests
-# ---------------------------------------------------------------------------
-
-
-class TestHydrologicArea:
-    def test_class_attrs_are_regions(self):
-        assert isinstance(HydrologicArea.AREA1, HydrologicRegion)
-        assert isinstance(HydrologicArea.AREA2, HydrologicRegion)
-
-    def test_area2_code(self):
-        assert HydrologicArea.AREA2.code == "TN_AREA2"
-
-    def test_from_int_valid(self):
-        assert HydrologicArea.from_int(1) is HydrologicArea.AREA1
-        assert HydrologicArea.from_int(4) is HydrologicArea.AREA4
-
-    def test_from_int_invalid(self):
-        with pytest.raises(ValueError, match="1-4"):
-            HydrologicArea.from_int(5)
-
-    def test_all_regions(self):
-        regions = HydrologicArea.all_regions()
-        assert len(regions) == 4
-        assert HydrologicArea.AREA2 in regions
-
-
-class TestSIR2024_5130:
-    @pytest.fixture
-    def legacy_coeff_dict(self) -> dict:
-        """Legacy b0/b1/b2 format coefficient dict for all four TN areas."""
-        b0_by_aep = {
-            0.5: 1.80,
-            0.2: 2.10,
-            0.1: 2.30,
-            0.04: 2.55,
-            0.02: 2.70,
-            0.01: 2.90,
-            0.005: 3.05,
-            0.002: 3.25,
+    def test_load_from_dict_new_style(self):
+        d = {
+            (TN_AREA2, 0.01): {
+                "intercept": 2.69,
+                "coefficients": {DRNAREA: 0.75, CSL1085LFP: 0.38},
+                "sep_pct": 35.0,
+            },
+            (GA_BLUE_RIDGE, 0.01): {
+                "intercept": 1.14,
+                "coefficients": {DRNAREA: 0.82, ELEV: 0.35},
+                "sep_pct": 38.0,
+            },
+            (MT_MOUNTAIN, 0.01): {
+                "intercept": -0.61,
+                "coefficients": {DRNAREA: 0.76, ELEV: 0.48, PRECIP: 0.62},
+            },
         }
-        areas = {
-            HydrologicArea.AREA1: dict(b1=0.75, b2=0.45),
-            HydrologicArea.AREA2: dict(b1=0.75, b2=0.38),
-            HydrologicArea.AREA3: dict(b1=0.72, b2=None),
-            HydrologicArea.AREA4: dict(b1=0.70, b2=0.12),
-        }
-        result = {}
-        for area, kw in areas.items():
-            for aep, b0 in b0_by_aep.items():
-                result[(area, aep)] = {
-                    "b0": b0,
-                    "b1": kw["b1"],
-                    "b2": kw["b2"],
-                    "sep_pct": 36.0,
-                    "pseudo_r2": 0.92,
-                    "eyr": 18.0,
-                }
-        return result
+        table = RegressionTable.load_from_dict(d)
+        assert len(table) == 3
+        assert set(table.available_states()) == {"TN", "GA", "MT"}
 
-    @pytest.fixture
-    def gls_table(self, legacy_coeff_dict) -> SIR2024_5130:
-        return SIR2024_5130.load_from_dict(legacy_coeff_dict)
-
-    def test_is_regression_table(self, gls_table):
-        assert isinstance(gls_table, RegressionTable)
-
-    def test_load_from_dict_legacy_count(self, gls_table):
-        assert len(gls_table) == 32
-
-    def test_legacy_b2_maps_to_correct_predictor(self, gls_table):
-        """b2 for Area2 must map to CSL1085LFP (the 2nd required_predictor)."""
-        eq = gls_table.get_equation(HydrologicArea.AREA2, 0.01)
-        assert CSL1085LFP in eq.coefficients
-        assert math.isclose(eq.coefficients[CSL1085LFP], 0.38)
-
-    def test_legacy_area3_no_b2(self, gls_table):
-        """Area 3 (DA-only) must not have a second predictor coefficient."""
-        eq = gls_table.get_equation(HydrologicArea.AREA3, 0.01)
-        assert CSL1085LFP not in eq.coefficients
-        assert len(eq.coefficients) == 1
-
-    def test_estimate_area2(self, gls_table):
-        basin = BasinCharacteristics(
-            site_no="03606500",
-            site_name="Big Sandy River",
-            region=HydrologicArea.AREA2,
-            predictors={DRNAREA: 779.0, CSL1085LFP: 2.4},
-        )
-        q = gls_table.estimate(basin, aep=0.01)
-        expected_log = 2.90 + 0.75 * math.log10(779.0) + 0.38 * math.log10(2.4)
-        assert math.isclose(math.log10(q), expected_log, rel_tol=1e-6)
-
-    def test_estimate_area3_da_only(self, gls_table):
-        basin = BasinCharacteristics(
-            site_no="X",
-            site_name="X",
-            region=HydrologicArea.AREA3,
-            predictors={DRNAREA: 120.5},
-        )
-        q = gls_table.estimate(basin, aep=0.01)
-        expected_log = 2.90 + 0.72 * math.log10(120.5)
-        assert math.isclose(math.log10(q), expected_log, rel_tol=1e-6)
-
-    def test_get_variance_area2(self, gls_table):
-        v = gls_table.get_variance(HydrologicArea.AREA2, 0.01)
-        assert v is not None and v > 0
-
-    def test_estimate_all_aeps_count(self, gls_table):
-        basin = BasinCharacteristics(
-            site_no="X",
-            site_name="X",
-            region=HydrologicArea.AREA2,
-            predictors={DRNAREA: 100.0, CSL1085LFP: 5.0},
-        )
-        results = gls_table.estimate_all_aeps(basin)
-        assert len(results) == 8
-
-    def test_publication_set(self, gls_table):
-        assert "2024-5130" in gls_table.publication or "sir20245130" in gls_table.publication
-
-    def test_write_table4_template(self):
-        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as fh:
-            tmp = fh.name
-        SIR2024_5130.write_table4_template(tmp)
-        content = Path(tmp).read_text()
-        Path(tmp).unlink()
-        lines = [l for l in content.splitlines() if l.strip()]
-        # header + 4 areas × 8 AEPs = 33
-        assert len(lines) == 33
-        assert DRNAREA in content
-
-    def test_csv_round_trip_via_sir_subclass(self, gls_table):
-        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as fh:
-            tmp = fh.name
-        gls_table.to_csv(tmp)
-        loaded = SIR2024_5130.load_from_csv(tmp)
-        Path(tmp).unlink()
-
-        assert len(loaded) == 32
-        eq = loaded.get_equation(HydrologicArea.AREA2, 0.01)
-        assert math.isclose(eq.intercept, 2.90)
-        assert math.isclose(eq.coefficients[DRNAREA], 0.75)
+    def test_load_from_dict_missing_intercept_raises(self):
+        with pytest.raises(KeyError):
+            RegressionTable.load_from_dict({(TN_AREA2, 0.01): {"coefficients": {DRNAREA: 0.75}}})

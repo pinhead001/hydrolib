@@ -234,15 +234,15 @@ class RoiAnalysis:
 
     Examples
     --------
-    >>> from hydrolib.regression.basin_chars import BasinCharacteristics, HydrologicArea
+    >>> from hydrolib.regression.basin_chars import BasinCharacteristics, DRNAREA, CSL1085LFP
     >>> from hydrolib.regression.roi_analysis import RoiAnalysis, RoiSite
+    >>> from hydrolib.regression.states.tennessee import TN_AREA2
     >>>
     >>> target = BasinCharacteristics(
     ...     site_no="UNGAGED01",
     ...     site_name="Target Site",
-    ...     drainage_area_sqmi=120.5,
-    ...     hydrologic_area=HydrologicArea.AREA2,
-    ...     slope_1085_ftmi=5.2,
+    ...     region=TN_AREA2,
+    ...     predictors={DRNAREA: 120.5, CSL1085LFP: 5.2},
     ... )
     >>> roi = RoiAnalysis(target, candidate_sites=[...])
     >>> roi.fetch_nwis_peaks()

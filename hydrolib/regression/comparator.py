@@ -489,10 +489,11 @@ class PeakFlowComparator:
             "GLS Regression vs ROI Analysis — Peak Flow Comparison",
             f"Site  : {self.basin.site_no} — {self.basin.site_name}",
             f"Area  : {self.basin.region.label}",
-            f"DA    : {self.basin.drainage_area_sqmi:.2f} sq mi",
+            f"DA    : {self.basin.predictors.get('DRNAREA', float('nan')):.2f} sq mi",
         ]
-        if self.basin.slope_1085_ftmi is not None:
-            lines.append(f"S1085 : {self.basin.slope_1085_ftmi:.3f} ft/mi")
+        slope = self.basin.predictors.get("CSL1085LFP")
+        if slope is not None:
+            lines.append(f"S1085 : {slope:.3f} ft/mi")
 
         karst = weighted.site_assessment.karst_flag.name
         lines.append(f"Karst : {karst}  ({weighted.site_assessment.notes or 'no notes'})")

@@ -2,24 +2,25 @@
 hydrolib.regression.basin_chars - Generic basin characteristics container.
 
 :class:`BasinCharacteristics` stores the hydraulic and physical attributes
-of a drainage basin required by regional regression equations.  Predictor
-values are stored in a flexible ``predictors`` dict keyed by **USGS
-StreamStats parameter codes** (e.g. ``"DRNAREA"``, ``"CSL1085LFP"``), so
-the same class works for equations in any state or publication.
+of a drainage basin required by regional regression equations.  All predictor
+values are stored in a ``predictors`` dict keyed by **USGS StreamStats
+parameter codes** so the same class works for any state and any predictor
+combination.
 
-Common StreamStats codes
-------------------------
-``DRNAREA``   — Drainage area (sq mi)
-``CSL1085LFP``— 10-85 channel slope (ft/mi)
-``I2``        — 2-year precipitation intensity (in/hr)
-``IMPERV``    — Impervious cover (%)
-``ELEV``      — Mean basin elevation (ft)
-``FOREST``    — Forest cover (%)
-``PRECIP``    — Mean annual precipitation (in)
-``BFIPCT``    — Base-flow index (%)
+Common StreamStats codes (use the constants below to avoid magic strings)
+--------------------------------------------------------------------------
+``DRNAREA``    — Drainage area (sq mi)
+``CSL1085LFP`` — 10-85 channel slope (ft/mi)
+``ELEV``       — Mean basin elevation (ft)
+``PRECIP``     — Mean annual precipitation (in)
+``I2``         — 2-year precipitation intensity (in/hr or in)
+``IMPERV``     — Impervious cover (%)
+``FOREST``     — Forest cover (%)
+``BFIPCT``     — Base-flow index (%)
+``SLOPE``      — Mean basin slope (%)
+``LC06IMP``    — 2006 NLCD impervious cover (%)
 
-Convenience properties expose the most common codes as named attributes
-so that existing code using ``basin.drainage_area_sqmi`` continues to work.
+Full list: https://streamstats.usgs.gov/ss/
 """
 
 from __future__ import annotations
@@ -33,24 +34,35 @@ from hydrolib.regression.region import HydrologicRegion
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# BasinCharacteristics
+# StreamStats code constants (use these to avoid magic strings in call sites)
 # ---------------------------------------------------------------------------
 
-# StreamStats code constants (avoid magic strings in calling code)
-DRNAREA = "DRNAREA"
-CSL1085LFP = "CSL1085LFP"
-I2 = "I2"
-IMPERV = "IMPERV"
-ELEV = "ELEV"
-FOREST = "FOREST"
-PRECIP = "PRECIP"
-BFIPCT = "BFIPCT"
+DRNAREA = "DRNAREA"  # Drainage area (sq mi) — universal
+CSL1085LFP = "CSL1085LFP"  # 10-85 channel slope (ft/mi)
+ELEV = "ELEV"  # Mean basin elevation (ft)
+PRECIP = "PRECIP"  # Mean annual precipitation (in)
+I2 = "I2"  # 2-yr precipitation intensity (in/hr or in)
+IMPERV = "IMPERV"  # Impervious cover (%)
+FOREST = "FOREST"  # Forest cover (%)
+BFIPCT = "BFIPCT"  # Base-flow index (%)
+SLOPE = "SLOPE"  # Mean basin slope (%)
+LC06IMP = "LC06IMP"  # 2006 NLCD impervious cover (%)
+
+
+# ---------------------------------------------------------------------------
+# BasinCharacteristics
+# ---------------------------------------------------------------------------
 
 
 @dataclass
 class BasinCharacteristics:
     """
     Physical and climatic characteristics of a drainage basin.
+
+    All predictor values live in ``predictors``, a dict keyed by USGS
+    StreamStats parameter codes.  This design is state-agnostic: Tennessee
+    equations need DRNAREA and CSL1085LFP; Montana mountain equations need
+    DRNAREA, ELEV, and PRECIP; both use the same class.
 
     Parameters
     ----------
@@ -61,11 +73,10 @@ class BasinCharacteristics:
     region : HydrologicRegion
         Hydrologic region to which this site is assigned.
     predictors : dict
-        Mapping of StreamStats parameter code -> value.  Must include all
-        codes listed in ``region.required_predictors``.
+        Mapping of StreamStats parameter code → value.  Must include all
+        codes listed in ``region.required_predictors`` with positive values.
     latitude : float, optional
-        Outlet latitude (decimal degrees, WGS84).  Used for ROI geographic
-        distance.
+        Outlet latitude (decimal degrees, WGS84).
     longitude : float, optional
         Outlet longitude (decimal degrees, WGS84).
     notes : str, optional
@@ -73,32 +84,40 @@ class BasinCharacteristics:
 
     Examples
     --------
-    >>> from hydrolib.regression.region import HydrologicRegion
-    >>> tn_area2 = HydrologicRegion(
-    ...     code="TN_AREA2", label="TN Area 2", state="TN",
-    ...     required_predictors=("DRNAREA", "CSL1085LFP"),
-    ... )
-    >>> basin = BasinCharacteristics(
-    ...     site_no="03606500",
-    ...     site_name="Big Sandy River at Bruceton, TN",
-    ...     region=tn_area2,
-    ...     predictors={"DRNAREA": 779.0, "CSL1085LFP": 2.4},
-    ... )
-    >>> basin.drainage_area_sqmi
-    779.0
+    Tennessee Middle TN (Area 2) — DA + channel slope::
 
-    Multi-state / arbitrary-predictor example (Kentucky)::
+        from hydrolib.regression.states.tennessee import TN_AREA2
+        from hydrolib.regression.basin_chars import DRNAREA, CSL1085LFP
 
-        ky_reg4 = HydrologicRegion(
-            code="KY_REGION4", label="KY Region 4", state="KY",
-            required_predictors=("DRNAREA", "CSL1085LFP"),
-            publication="WRIR 03-4180",
+        basin = BasinCharacteristics(
+            site_no="03606500",
+            site_name="Big Sandy River at Bruceton, TN",
+            region=TN_AREA2,
+            predictors={DRNAREA: 779.0, CSL1085LFP: 2.4},
         )
-        ky_basin = BasinCharacteristics(
-            site_no="03287500",
-            site_name="Licking River at Farmers, KY",
-            region=ky_reg4,
-            predictors={"DRNAREA": 1140.0, "CSL1085LFP": 1.8},
+
+    Montana mountain — DA + elevation + precipitation::
+
+        from hydrolib.regression.states.montana import MT_MOUNTAIN
+        from hydrolib.regression.basin_chars import DRNAREA, ELEV, PRECIP
+
+        mt_basin = BasinCharacteristics(
+            site_no="MT-UNGAGED",
+            site_name="Lost Horse Creek near Hamilton, MT",
+            region=MT_MOUNTAIN,
+            predictors={DRNAREA: 45.0, ELEV: 5800.0, PRECIP: 32.0},
+        )
+
+    Georgia Blue Ridge — DA + elevation::
+
+        from hydrolib.regression.states.georgia import GA_BLUE_RIDGE
+        from hydrolib.regression.basin_chars import DRNAREA, ELEV
+
+        ga_basin = BasinCharacteristics(
+            site_no="02333500",
+            site_name="Chattahoochee River near Helen, GA",
+            region=GA_BLUE_RIDGE,
+            predictors={DRNAREA: 47.0, ELEV: 2650.0},
         )
     """
 
@@ -120,28 +139,8 @@ class BasinCharacteristics:
             ) from exc
 
     # ------------------------------------------------------------------
-    # Convenience properties (most-common StreamStats codes)
+    # Properties
     # ------------------------------------------------------------------
-
-    @property
-    def drainage_area_sqmi(self) -> Optional[float]:
-        """Drainage area in square miles (``DRNAREA``)."""
-        return self.predictors.get(DRNAREA)
-
-    @property
-    def slope_1085_ftmi(self) -> Optional[float]:
-        """10-85 channel slope in ft/mi (``CSL1085LFP``)."""
-        return self.predictors.get(CSL1085LFP)
-
-    @property
-    def climate_factor_2yr(self) -> Optional[float]:
-        """2-year precipitation intensity (``I2``)."""
-        return self.predictors.get(I2)
-
-    @property
-    def pct_impervious(self) -> Optional[float]:
-        """Percent impervious cover (``IMPERV``)."""
-        return self.predictors.get(IMPERV)
 
     @property
     def state(self) -> str:
@@ -167,25 +166,18 @@ class BasinCharacteristics:
         """
         Construct directly from a StreamStats parameter dictionary.
 
-        All keys from *streamstats_params* are forwarded to ``predictors``,
-        so the full StreamStats response can be passed without pre-filtering.
-        Required predictor validation still runs via ``__post_init__``.
+        All numeric entries from *streamstats_params* are forwarded to
+        ``predictors``; non-numeric values are silently dropped.  Required
+        predictor validation still runs via ``__post_init__``.
 
         Parameters
         ----------
-        site_no : str
-        site_name : str
+        site_no, site_name : str
         region : HydrologicRegion
         streamstats_params : dict
-            Mapping StreamStats parameter code -> numeric value.
-            Typically obtained from the StreamStats REST API response::
+            Full StreamStats response mapping code → value, e.g.::
 
-                {
-                    "DRNAREA": 85.3,
-                    "CSL1085LFP": 4.7,
-                    "ELEV": 1240.0,
-                    ...
-                }
+                {"DRNAREA": 85.3, "CSL1085LFP": 4.7, "ELEV": 1240.0}
 
         latitude, longitude : float, optional
         notes : str, optional
@@ -193,13 +185,7 @@ class BasinCharacteristics:
         Returns
         -------
         BasinCharacteristics
-
-        Raises
-        ------
-        ValueError
-            If any required predictor for *region* is missing.
         """
-        # Convert all values to float, silently skip non-numeric entries
         predictors: Dict[str, float] = {}
         for k, v in streamstats_params.items():
             try:
@@ -250,6 +236,7 @@ class BasinCharacteristics:
         """Return a formatted one-paragraph summary."""
         lines = [
             f"Site  : {self.site_no} — {self.site_name}",
+            f"State : {self.region.state}",
             f"Region: {self.region}",
         ]
         for code in sorted(self.predictors):
