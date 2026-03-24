@@ -1,6 +1,6 @@
 """
-Tests for the seven Western US state regression equation modules:
-New Mexico, Colorado, Wyoming, Idaho, Washington, Oregon, California.
+Tests for state regression equation modules:
+Alabama, New Mexico, Colorado, Wyoming, Idaho, Washington, Oregon, California.
 
 Each state module is validated for:
 - Correct equation count and AEP coverage
@@ -8,7 +8,7 @@ Each state module is validated for:
 - Correct predictor isolation per region
 - State code and region code consistency
 - Variance / SEP% availability
-- 10-state nationwide merge
+- 11-state nationwide merge
 """
 
 from __future__ import annotations
@@ -23,6 +23,14 @@ from hydrolib.regression.basin_chars import (
     BasinCharacteristics,
 )
 from hydrolib.regression.regression_table import STANDARD_AEPS, RegressionTable
+from hydrolib.regression.states.alabama import (
+    AL_APPALACHIAN,
+    AL_COASTAL,
+    AL_PIEDMONT,
+    AL_REGIONS,
+    AL_VALLEY_RIDGE,
+    build_alabama_table,
+)
 from hydrolib.regression.states.california import (
     CA_CENTRAL,
     CA_NORTH_COAST,
@@ -85,6 +93,11 @@ from hydrolib.regression.states.wyoming import (
 
 
 @pytest.fixture(scope="module")
+def al_table() -> RegressionTable:
+    return build_alabama_table()
+
+
+@pytest.fixture(scope="module")
 def nm_table() -> RegressionTable:
     return build_new_mexico_table()
 
@@ -133,6 +146,101 @@ def _assert_monotonic_q(table: RegressionTable, basin: BasinCharacteristics) -> 
         f"Non-monotonic or non-positive flows for {basin.region.code}: "
         f"Q2={q2:.0f}, Q10={q10:.0f}, Q100={q100:.0f}"
     )
+
+
+# ===========================================================================
+# Alabama
+# ===========================================================================
+
+
+class TestAlabama:
+    def test_equation_count(self, al_table):
+        assert len(al_table) == 32  # 4 regions × 8 AEPs
+
+    def test_state_code(self, al_table):
+        for r in al_table.available_regions():
+            assert r.state == "AL"
+
+    def test_region_codes(self):
+        codes = {r.code for r in AL_REGIONS}
+        assert codes == {"AL-1", "AL-2", "AL-3", "AL-4"}
+
+    def test_appalachian_slope_predictor(self):
+        assert "CSL1085LFP" in AL_APPALACHIAN.required_predictors
+
+    def test_valley_ridge_slope_predictor(self):
+        assert "CSL1085LFP" in AL_VALLEY_RIDGE.required_predictors
+
+    def test_piedmont_slope_predictor(self):
+        assert "CSL1085LFP" in AL_PIEDMONT.required_predictors
+
+    def test_coastal_da_only(self):
+        assert AL_COASTAL.required_predictors == ("DRNAREA",)
+
+    def test_all_aeps_present(self, al_table):
+        for region in AL_REGIONS:
+            assert set(al_table.available_aeps(region)) == set(STANDARD_AEPS)
+
+    def test_appalachian_monotonic(self, al_table):
+        basin = BasinCharacteristics(
+            site_no="AL-AP-01",
+            site_name="Bear Creek Basin, AL",
+            region=AL_APPALACHIAN,
+            predictors={DRNAREA: 232.0, CSL1085LFP: 8.2},
+        )
+        _assert_monotonic_q(al_table, basin)
+
+    def test_coastal_plain_monotonic(self, al_table):
+        basin = BasinCharacteristics(
+            site_no="AL-CP-01",
+            site_name="Test Coastal Plain Basin, AL",
+            region=AL_COASTAL,
+            predictors={DRNAREA: 400.0},
+        )
+        _assert_monotonic_q(al_table, basin)
+
+    def test_valley_ridge_slope_effect(self, al_table):
+        """Steeper channel → higher Q for same DA (positive slope exponent)."""
+        b_flat = BasinCharacteristics(
+            site_no="V1",
+            site_name="V1",
+            region=AL_VALLEY_RIDGE,
+            predictors={DRNAREA: 100.0, CSL1085LFP: 2.0},
+        )
+        b_steep = BasinCharacteristics(
+            site_no="V2",
+            site_name="V2",
+            region=AL_VALLEY_RIDGE,
+            predictors={DRNAREA: 100.0, CSL1085LFP: 15.0},
+        )
+        assert al_table.estimate(b_steep, aep=0.01) > al_table.estimate(b_flat, aep=0.01)
+
+    def test_missing_predictor_raises(self):
+        """Appalachian requires CSL1085LFP; omitting raises ValueError at construction."""
+        with pytest.raises(ValueError, match="missing predictors"):
+            BasinCharacteristics(
+                site_no="AL-BAD",
+                site_name="Bad Basin",
+                region=AL_APPALACHIAN,
+                predictors={DRNAREA: 100.0},
+            )
+
+    def test_sep_pct_available(self, al_table):
+        eq = al_table.get_equation(AL_PIEDMONT, 0.01)
+        assert eq.sep_pct is not None and eq.sep_pct > 0
+
+    def test_variance_positive(self, al_table):
+        eq = al_table.get_equation(AL_COASTAL, 0.01)
+        assert eq.variance_log10 is not None and eq.variance_log10 > 0
+
+    def test_piedmont_monotonic(self, al_table):
+        basin = BasinCharacteristics(
+            site_no="AL-PI-01",
+            site_name="Test Piedmont Basin, AL",
+            region=AL_PIEDMONT,
+            predictors={DRNAREA: 150.0, CSL1085LFP: 6.5},
+        )
+        _assert_monotonic_q(al_table, basin)
 
 
 # ===========================================================================
@@ -712,15 +820,16 @@ class TestCalifornia:
 
 
 @pytest.fixture(scope="module")
-def national_10_table(
-    nm_table, co_table, wy_table, id_table, wa_table, or_table, ca_table
+def national_11_table(
+    al_table, nm_table, co_table, wy_table, id_table, wa_table, or_table, ca_table
 ) -> RegressionTable:
-    """Full 10-state nationwide table."""
+    """Full 11-state nationwide table."""
     from hydrolib.regression.states.georgia import build_georgia_table
     from hydrolib.regression.states.montana import build_montana_table
     from hydrolib.regression.states.tennessee import build_tennessee_table
 
     return RegressionTable.merge(
+        al_table,
         build_tennessee_table(),
         build_georgia_table(),
         build_montana_table(),
@@ -734,37 +843,48 @@ def national_10_table(
     )
 
 
-class TestNationwide10State:
-    def test_ten_states_present(self, national_10_table):
-        states = set(national_10_table.available_states())
-        assert states == {"TN", "GA", "MT", "NM", "CO", "WY", "ID", "WA", "OR", "CA"}
+class TestNationwide11State:
+    def test_eleven_states_present(self, national_11_table):
+        states = set(national_11_table.available_states())
+        assert states == {"AL", "TN", "GA", "MT", "NM", "CO", "WY", "ID", "WA", "OR", "CA"}
 
-    def test_equation_count(self, national_10_table):
-        # TN=32, GA=32, MT=24, NM=32, CO=32, WY=24, ID=32, WA=32, OR=32, CA=32 = 304
-        assert len(national_10_table) == 304
+    def test_equation_count(self, national_11_table):
+        # AL=32, TN=32, GA=32, MT=24, NM=32, CO=32, WY=24, ID=32, WA=32, OR=32, CA=32 = 336
+        assert len(national_11_table) == 336
 
-    def test_filter_by_ca(self, national_10_table):
-        ca_only = national_10_table.filter_by_state("CA")
+    def test_filter_by_al(self, national_11_table):
+        al_only = national_11_table.filter_by_state("AL")
+        assert len(al_only) == 32
+        assert al_only.available_states() == ["AL"]
+
+    def test_filter_by_ca(self, national_11_table):
+        ca_only = national_11_table.filter_by_state("CA")
         assert len(ca_only) == 32
         assert ca_only.available_states() == ["CA"]
 
-    def test_filter_by_wy(self, national_10_table):
-        wy_only = national_10_table.filter_by_state("WY")
+    def test_filter_by_wy(self, national_11_table):
+        wy_only = national_11_table.filter_by_state("WY")
         assert len(wy_only) == 24
         assert wy_only.available_states() == ["WY"]
 
-    def test_regions_for_wa(self, national_10_table):
-        wa_regions = national_10_table.regions_for_state("WA")
+    def test_regions_for_wa(self, national_11_table):
+        wa_regions = national_11_table.regions_for_state("WA")
         codes = {r.code for r in wa_regions}
         assert codes == {"WA-1", "WA-2", "WA-3", "WA-4"}
 
-    def test_region_code_uniqueness(self, national_10_table):
-        """Every region code in the 10-state table is unique."""
-        all_codes = [r.code for r in national_10_table.available_regions()]
+    def test_region_code_uniqueness(self, national_11_table):
+        """Every region code in the 11-state table is unique."""
+        all_codes = [r.code for r in national_11_table.available_regions()]
         assert len(all_codes) == len(set(all_codes)), "Duplicate region codes detected"
 
-    def test_batch_estimate_multi_state(self, national_10_table):
+    def test_batch_estimate_multi_state(self, national_11_table):
         basins = [
+            BasinCharacteristics(
+                site_no="AL01",
+                site_name="AL Test",
+                region=AL_APPALACHIAN,
+                predictors={DRNAREA: 232.0, CSL1085LFP: 8.2},
+            ),
             BasinCharacteristics(
                 site_no="NM01",
                 site_name="NM Test",
@@ -808,13 +928,13 @@ class TestNationwide10State:
                 predictors={DRNAREA: 50.0},
             ),
         ]
-        results = national_10_table.batch_estimate(basins, aep=0.01)
-        assert len(results) == 7
+        results = national_11_table.batch_estimate(basins, aep=0.01)
+        assert len(results) == 8
         assert all(q > 0 for q in results.values())
 
-    def test_batch_skips_wrong_region(self, national_10_table):
+    def test_batch_skips_wrong_region(self, national_11_table):
         """Basin with region not in a filtered table → silently skipped."""
-        nm_only = national_10_table.filter_by_state("NM")
+        nm_only = national_11_table.filter_by_state("NM")
         basin_wrong = BasinCharacteristics(
             site_no="ID99",
             site_name="Idaho Basin",
@@ -824,8 +944,8 @@ class TestNationwide10State:
         results = nm_only.batch_estimate([basin_wrong], aep=0.01)
         assert "ID99" not in results
 
-    def test_publication_non_empty(self, national_10_table):
-        assert len(national_10_table.publication) > 0
+    def test_publication_non_empty(self, national_11_table):
+        assert len(national_11_table.publication) > 0
 
 
 # ===========================================================================
@@ -839,6 +959,10 @@ class TestPredictorIsolation:
     @pytest.mark.parametrize(
         "table_fixture, region, predictors",
         [
+            ("al_table", AL_APPALACHIAN, {DRNAREA: 232.0, CSL1085LFP: 8.2}),
+            ("al_table", AL_VALLEY_RIDGE, {DRNAREA: 100.0, CSL1085LFP: 5.0}),
+            ("al_table", AL_PIEDMONT, {DRNAREA: 150.0, CSL1085LFP: 6.5}),
+            ("al_table", AL_COASTAL, {DRNAREA: 400.0}),
             ("nm_table", NM_MOUNTAIN, {DRNAREA: 80.0, PRECIP: 22.0}),
             ("nm_table", NM_TRANSITION, {DRNAREA: 60.0, CSL1085LFP: 7.0}),
             ("nm_table", NM_PLAINS, {DRNAREA: 120.0}),

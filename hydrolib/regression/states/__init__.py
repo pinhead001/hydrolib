@@ -10,16 +10,17 @@ one state, following a consistent pattern::
 
 Supported states
 ----------------
-* ``tennessee``  — SIR 2024-5130 (4 areas, DA + slope/I2/IMPERV)
+* ``alabama``    — Appalachian Plateaus, Valley/Ridge, Piedmont, Coastal Plain
+* ``california`` — North Coast, Sierra Nevada, Central Valley, Southern
+* ``colorado``   — Front Range, Eastern Plains, Western Slope, San Luis Valley
 * ``georgia``    — Blue Ridge, Valley/Ridge, Piedmont, Coastal Plain
+* ``idaho``      — North, Central Mountains, Snake Plain, Southern Highlands
 * ``montana``    — Mountain (DA + ELEV + PRECIP), Foothills, Plains
 * ``new_mexico`` — Mountain, Transitional, Plains, Desert (4 regions)
-* ``colorado``   — Front Range, Eastern Plains, Western Slope, San Luis Valley
-* ``wyoming``    — Mountain, Foothills, Eastern Plains (3 regions)
-* ``idaho``      — North, Central Mountains, Snake Plain, Southern Highlands
-* ``washington`` — Olympic/Coast, W. Cascades, E. Cascades, Eastern
 * ``oregon``     — Coast, Willamette Valley, Cascades, Eastern
-* ``california`` — North Coast, Sierra Nevada, Central Valley, Southern
+* ``tennessee``  — SIR 2024-5130 (4 areas, DA + slope/I2/IMPERV)
+* ``washington`` — Olympic/Coast, W. Cascades, E. Cascades, Eastern
+* ``wyoming``    — Mountain, Foothills, Eastern Plains (3 regions)
 
 Quick start — nationwide merged table
 --------------------------------------
@@ -27,13 +28,14 @@ Quick start — nationwide merged table
 
     from hydrolib.regression.regression_table import RegressionTable
     from hydrolib.regression.states import (
-        build_tennessee_table, build_georgia_table, build_montana_table,
-        build_new_mexico_table, build_colorado_table, build_wyoming_table,
-        build_idaho_table, build_washington_table, build_oregon_table,
-        build_california_table,
+        build_alabama_table, build_tennessee_table, build_georgia_table,
+        build_montana_table, build_new_mexico_table, build_colorado_table,
+        build_wyoming_table, build_idaho_table, build_washington_table,
+        build_oregon_table, build_california_table,
     )
 
     national = RegressionTable.merge(
+        build_alabama_table(),
         build_tennessee_table(),
         build_georgia_table(),
         build_montana_table(),
@@ -46,10 +48,18 @@ Quick start — nationwide merged table
         build_california_table(),
     )
     # national.available_states()
-    # → ['CA', 'CO', 'GA', 'ID', 'MT', 'NM', 'OR', 'TN', 'WA', 'WY']
+    # → ['AL', 'CA', 'CO', 'GA', 'ID', 'MT', 'NM', 'OR', 'TN', 'WA', 'WY']
     # national.batch_estimate(site_list, aep=0.01)
 """
 
+from hydrolib.regression.states.alabama import (
+    AL_APPALACHIAN,
+    AL_COASTAL,
+    AL_PIEDMONT,
+    AL_REGIONS,
+    AL_VALLEY_RIDGE,
+    build_alabama_table,
+)
 from hydrolib.regression.states.california import (
     CA_CENTRAL,
     CA_NORTH_COAST,
@@ -130,6 +140,13 @@ from hydrolib.regression.states.wyoming import (
 )
 
 __all__ = [
+    # Alabama
+    "AL_APPALACHIAN",
+    "AL_VALLEY_RIDGE",
+    "AL_PIEDMONT",
+    "AL_COASTAL",
+    "AL_REGIONS",
+    "build_alabama_table",
     # Tennessee
     "TN_AREA1",
     "TN_AREA2",
