@@ -65,12 +65,14 @@ class Hydrograph:
         color: str = plt_color,
         por_start: str = None,
         por_end: str = None,
+        log_scale: bool = False,
     ) -> plt.Figure:
         """Plot daily flow time series."""
         fig, ax = plt.subplots(figsize=figsize)
 
         ax.plot(daily_data.index, daily_data["flow_cfs"], color=color, linewidth=0.5, alpha=0.8)
-        ax.set_yscale("log")
+        if log_scale:
+            ax.set_yscale("log")
         ax.set_ylabel("Discharge (cfs)", fontsize=cls.FONT_SIZE)
         ax.set_xlabel("Date", fontsize=cls.FONT_SIZE)
 
@@ -84,10 +86,10 @@ class Hydrograph:
         ax.grid(True, which="both", alpha=0.3)
         ax.xaxis.set_major_formatter(DateFormatter("%Y"))
 
-        # Set y-ticks to powers of 10
+        # Set y-ticks to powers of 10 for log scale
         min_flow = daily_data["flow_cfs"].min()
         max_flow = daily_data["flow_cfs"].max()
-        if min_flow > 0:
+        if log_scale and min_flow > 0:
             min_exp = math.floor(math.log10(min_flow))
             max_exp = math.ceil(math.log10(max_flow))
             ticks = [10**i for i in range(min_exp, max_exp + 1)]
@@ -134,6 +136,7 @@ class Hydrograph:
         percentiles: List[int] = None,
         por_start: str = None,
         por_end: str = None,
+        log_scale: bool = False,
     ) -> plt.Figure:
         """Plot summary hydrograph with day of water year on x-axis."""
         if percentiles is None:
@@ -187,7 +190,8 @@ class Hydrograph:
             label="Max",
         )
 
-        ax.set_yscale("log")
+        if log_scale:
+            ax.set_yscale("log")
         ax.set_ylabel("Discharge (cfs)", fontsize=cls.FONT_SIZE)
         ax.set_xlabel("Day of Water Year", fontsize=cls.FONT_SIZE)
 
@@ -195,10 +199,10 @@ class Hydrograph:
         ax.set_xticklabels(cls.MONTH_LABELS)
         ax.set_xlim(1, 366)
 
-        # Set y-ticks to powers of 10
+        # Set y-ticks to powers of 10 for log scale
         min_flow = daily_data["flow_cfs"].min()
         max_flow = daily_data["flow_cfs"].max()
-        if min_flow > 0:
+        if log_scale and min_flow > 0:
             min_exp = math.floor(math.log10(min_flow))
             max_exp = math.ceil(math.log10(max_flow))
             ticks = [10**i for i in range(min_exp, max_exp + 1)]
@@ -284,6 +288,7 @@ class Hydrograph:
         figsize: Tuple[int, int] = (10, 6),
         por_start: str = None,
         por_end: str = None,
+        log_scale: bool = False,
     ) -> Tuple[plt.Figure, pd.DataFrame]:
         """Plot flow duration curve and return flow duration statistics table."""
         flows = daily_data["flow_cfs"].dropna().values
@@ -294,7 +299,8 @@ class Hydrograph:
         fig, ax = plt.subplots(figsize=figsize)
 
         ax.plot(exceedance_pct, flows_sorted, color=plt_color, linewidth=1.5)
-        ax.set_yscale("log")
+        if log_scale:
+            ax.set_yscale("log")
         ax.set_xlabel("Percent of Time Exceeded (%)", fontsize=cls.FONT_SIZE)
         ax.set_ylabel("Discharge (cfs)", fontsize=cls.FONT_SIZE)
 
@@ -307,10 +313,10 @@ class Hydrograph:
 
         ax.grid(True, which="both", alpha=0.3)
 
-        # Set y-ticks to powers of 10
+        # Set y-ticks to powers of 10 for log scale
         min_flow = flows.min()
         max_flow = flows.max()
-        if min_flow > 0:
+        if log_scale and min_flow > 0:
             min_exp = math.floor(math.log10(min_flow))
             max_exp = math.ceil(math.log10(max_flow))
             ticks = [10**i for i in range(min_exp, max_exp + 1)]

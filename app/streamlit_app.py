@@ -63,6 +63,25 @@ show_timeseries = st.sidebar.checkbox("Daily Time Series", value=True)
 show_summary = st.sidebar.checkbox("Summary Hydrograph", value=True)
 show_fdc = st.sidebar.checkbox("Flow Duration Curve", value=True)
 
+# Y-axis scale options
+scale_mode = st.sidebar.radio(
+    "Y-Axis Scale",
+    ["Linear", "Log", "Per Plot"],
+    horizontal=True,
+)
+
+# Per-plot scale settings (only shown when "Per Plot" is selected)
+if scale_mode == "Per Plot":
+    st.sidebar.markdown("**Scale per plot:**")
+    log_timeseries = st.sidebar.checkbox("Log: Daily Time Series", value=False)
+    log_summary = st.sidebar.checkbox("Log: Summary Hydrograph", value=False)
+    log_fdc = st.sidebar.checkbox("Log: Flow Duration Curve", value=False)
+else:
+    # All plots use the same scale
+    log_timeseries = scale_mode == "Log"
+    log_summary = scale_mode == "Log"
+    log_fdc = scale_mode == "Log"
+
 # Download button
 download_data = st.sidebar.button("Download Data", type="primary")
 
@@ -77,6 +96,14 @@ if "expanded_gage" not in st.session_state:
     st.session_state.expanded_gage = None
 if "expanded_plot_idx" not in st.session_state:
     st.session_state.expanded_plot_idx = 0
+if "prev_scale_settings" not in st.session_state:
+    st.session_state.prev_scale_settings = None
+
+# Clear figures cache when scale settings change
+current_scale_settings = (scale_mode, log_timeseries, log_summary, log_fdc)
+if st.session_state.prev_scale_settings != current_scale_settings:
+    st.session_state.figures = {}
+    st.session_state.prev_scale_settings = current_scale_settings
 
 
 def get_plot_list(site_no):
@@ -105,7 +132,8 @@ def format_date(dt):
     return f"{dt.month}/{dt.day}/{dt.year}"
 
 
-def generate_plots(site_no, plot_data, gage_info, por_start_str=None, por_end_str=None):
+def generate_plots(site_no, plot_data, gage_info, por_start_str=None, por_end_str=None,
+                    log_ts=False, log_sh=False, log_fdc=False):
     """Generate plots for a gage using the provided data."""
     site_figs = {}
 
@@ -118,6 +146,7 @@ def generate_plots(site_no, plot_data, gage_info, por_start_str=None, por_end_st
             figsize=(10, 4),
             por_start=por_start_str,
             por_end=por_end_str,
+            log_scale=log_ts,
         )
         site_figs["daily_timeseries"] = fig1
 
@@ -131,6 +160,7 @@ def generate_plots(site_no, plot_data, gage_info, por_start_str=None, por_end_st
             percentiles=[10, 25, 50, 75, 90],
             por_start=por_start_str,
             por_end=por_end_str,
+            log_scale=log_sh,
         )
         site_figs["summary_hydrograph"] = fig2
         # Store summary stats for export
@@ -145,6 +175,7 @@ def generate_plots(site_no, plot_data, gage_info, por_start_str=None, por_end_st
             figsize=(10, 4),
             por_start=por_start_str,
             por_end=por_end_str,
+            log_scale=log_fdc,
         )
         site_figs["flow_duration_curve"] = fig3
         site_figs["fdc_stats"] = stats_df
@@ -275,7 +306,8 @@ if st.session_state.gage_data:
                 por_end_str = format_date(gage_info['por_end'])
 
             st.session_state.figures[site_no] = generate_plots(
-                site_no, plot_data, gage_info, por_start_str, por_end_str
+                site_no, plot_data, gage_info, por_start_str, por_end_str,
+                log_ts=log_timeseries, log_sh=log_summary, log_fdc=log_fdc
             )
 
         site_figs = st.session_state.figures[site_no]
