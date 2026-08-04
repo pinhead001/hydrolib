@@ -43,6 +43,20 @@ st.set_page_config(
     layout="wide",
 )
 
+
+def sidebar_help(label: str, text: str) -> None:
+    """Render a tap-to-open help popover in the sidebar.
+
+    Streamlit's built-in ``help=`` tooltip relies on CSS ``:hover``, which
+    mobile browsers only emulate on touch and clear unpredictably (often
+    before the text can be read). A popover is opened/closed by an explicit
+    click/tap and stays open until dismissed, so it behaves the same on
+    mobile and desktop.
+    """
+    with st.sidebar.popover(f"❓ {label}", use_container_width=True):
+        st.markdown(text)
+
+
 st.title("USGS Hydrograph-erator")
 st.markdown(
     "Generate daily flow plots for USGS gages using [hydrolib](https://github.com/pinhead001/hydrolib)"
@@ -107,14 +121,22 @@ if enable_ffa:
         value=-0.302,
         step=0.001,
         format="%.3f",
-        help="Generalized skew from Bulletin 17C Appendix or regional study. Nationwide default: -0.302",
+    )
+    sidebar_help(
+        "Regional Skew",
+        "Generalized skew from Bulletin 17C Appendix or regional study. "
+        "Nationwide default: -0.302 (not looked up per state/region — enter "
+        "your study area's value manually).",
     )
     regional_skew_se = st.sidebar.number_input(
         "Regional Skew SE",
         value=0.55,
         step=0.01,
         format="%.2f",
-        help="Standard error of the regional skew estimate. Nationwide default: 0.55",
+    )
+    sidebar_help(
+        "Regional Skew SE",
+        "Standard error of the regional skew estimate. Nationwide default: 0.55",
     )
     show_freq_curve = st.sidebar.checkbox("Frequency Curve", value=True)
     if show_freq_curve:
@@ -128,8 +150,8 @@ if enable_ffa:
             "Show Return Period Lines",
             options=quantile_options,
             default=[1.5, 25, 100],
-            help="Horizontal lines showing flood frequency quantiles"
         )
+        sidebar_help("Return Period Lines", "Horizontal lines showing flood frequency quantiles")
         show_max_ri = st.sidebar.checkbox("Show Max Peak RI Estimate", value=False)
     else:
         show_quantile_lines = []
