@@ -182,17 +182,66 @@ _STUDIES: List[RegionalSkewEstimate] = [
             "before use."
         ),
     ),
+    RegionalSkewEstimate(
+        value=-0.09,
+        se=0.08**0.5,
+        source=(
+            "Paretti, N.V., and others, 2014, Methods for estimating "
+            "magnitude and frequency of floods in Arizona, developed with "
+            "unregulated and rural peak-flow data through water year 2010: "
+            "U.S. Geological Survey Scientific Investigations Report "
+            "2014-5211"
+        ),
+        source_url="https://pubs.usgs.gov/sir/2014/5211/",
+        states=["AZ"],
+        note=(
+            "Statewide constant regional skew from a Bayesian "
+            "generalized least-squares analysis of 448 gages -- no basin "
+            "characteristic explained the variation in skew well enough "
+            "to justify a spatially-varying model, so a constant was "
+            "adopted (MSE 0.08, versus MSE 0.31 for the prior Arizona "
+            "regional skew analysis)."
+        ),
+    ),
 ]
 
-# Idaho and Oregon are deliberately NOT included above: both use spatially
-# varying skew (Idaho: three separate maps selected by flood type -- snowmelt,
-# rainstorm, or mixed, per Kjelstrom and Moffatt, 1981, USGS Open-File Report
-# 81-909; Oregon: three "flood regions" in the western part of the state with
-# separate equations, per USGS SIR 2005-5116) rather than a single state-wide
-# constant, so they don't fit this module's (value, se) schema. Adding a
-# single fabricated number for either would be misleading. They currently
-# fall back to NATIONWIDE_FALLBACK; consult the cited reports (or the USGS
-# Flood Frequency Reports index) directly for a site-specific value.
+# The following states were investigated but deliberately NOT included
+# above, because either no single citable numeric constant could be found,
+# or (more often in mountainous/western terrain) the state's own study
+# explicitly uses a spatially-varying skew rather than one constant, so it
+# doesn't fit this module's (value, se) schema. Adding a single fabricated
+# number for any of them would misrepresent the source study. They fall
+# back to NATIONWIDE_FALLBACK; consult the cited reports (or the USGS Flood
+# Frequency Reports index) directly for a site-specific value.
+#
+#   Idaho    -- three separate skew maps selected by flood type (snowmelt,
+#               rainstorm, or mixed). Kjelstrom and Moffatt, 1981, USGS
+#               Open-File Report 81-909.
+#   Oregon   -- three "flood regions" in western Oregon with separate
+#               equations. USGS SIR 2005-5116.
+#   California -- regional skew is an explicit nonlinear function of mean
+#               basin elevation (-0.62 at 0 ft to 0.61 at 11,000 ft), not a
+#               constant. USGS SIR 2010-5260; duration-based skews in the
+#               Central Valley also vary by elevation and duration, USGS
+#               SIR 2012-5130.
+#   Wyoming  -- gages grouped into six hydrologic regions, each with its
+#               own generalized least-squares regression equations, not a
+#               single statewide constant. Miller, K.A., 2003, Peak-flow
+#               characteristics of Wyoming streams, USGS WRIR 03-4107.
+#   New Mexico -- generalized skew for the eastern part of the state (only)
+#               is a spatially-varying GAM-based surface, not a constant,
+#               shared with Texas and Oklahoma (USGS technique report,
+#               Texas/Oklahoma/eastern New Mexico); western New Mexico is
+#               not covered by that report at all.
+#   Nevada   -- covered only by USGS Water-Supply Paper 2433 (1997),
+#               "Methods for Estimating Magnitude and Frequency of Floods
+#               in the Southwestern United States"; no single statewide
+#               constant could be confirmed from available sources.
+#   Colorado -- USGS SIR 2009-5136 develops regional regression equations
+#               for Colorado streamflow statistics, but no single statewide
+#               regional-skew constant could be confirmed from available
+#               sources; Colorado's mix of plains and mountainous terrain
+#               makes a single constant unlikely.
 
 # USPS state/territory abbreviation -> full name, for input normalization
 # and for building UI pickers.

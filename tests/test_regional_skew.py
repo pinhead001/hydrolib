@@ -87,6 +87,22 @@ class TestGetRegionalSkew:
         assert idaho is NATIONWIDE_FALLBACK
         assert oregon is NATIONWIDE_FALLBACK
 
+    def test_arizona_uses_statewide_constant(self):
+        az = get_regional_skew("Arizona")
+        assert az.value == pytest.approx(-0.09)
+        assert az.mse == pytest.approx(0.08)
+        assert "Paretti" in az.source
+
+    def test_other_southwest_states_not_yet_covered(self):
+        # New Mexico, Nevada, Utah, Colorado, Wyoming, and California were
+        # all investigated: no single citable statewide constant could be
+        # confirmed, and several (Wyoming: 6 regions; California: skew as a
+        # continuous function of elevation) are confirmed to use spatially
+        # varying models that don't fit a single (value, se). They should
+        # fall back to the nationwide default rather than a guessed number.
+        for state in ["New Mexico", "Nevada", "Utah", "Colorado", "Wyoming", "California"]:
+            assert get_regional_skew(state) is NATIONWIDE_FALLBACK, state
+
     def test_invalid_state_raises(self):
         with pytest.raises(ValueError):
             get_regional_skew("Not A State")
