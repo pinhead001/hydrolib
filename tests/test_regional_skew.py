@@ -63,6 +63,30 @@ class TestGetRegionalSkew:
         assert estimate.value == NATIONWIDE_SKEW
         assert estimate.se == NATIONWIDE_SKEW_SE
 
+    def test_montana_uses_nationwide_value_with_recalibrated_se(self):
+        mt = get_regional_skew("Montana")
+        assert mt.value == NATIONWIDE_SKEW
+        assert mt.se == pytest.approx(0.64)
+        assert mt.se != NATIONWIDE_SKEW_SE
+        assert "Parrett" in mt.source
+
+    def test_washington_defers_to_nationwide_value_and_se(self):
+        wa = get_regional_skew("WA")
+        assert wa.value == NATIONWIDE_SKEW
+        assert wa.se == NATIONWIDE_SKEW_SE
+        assert wa is not NATIONWIDE_FALLBACK
+        assert "Washington" in wa.source
+
+    def test_idaho_and_oregon_not_yet_covered(self):
+        # Both use spatially-varying skew (Idaho: 3 maps by flood type;
+        # Oregon: 3 flood regions) that don't fit a single (value, se) --
+        # they should fall back to the nationwide default, not a guessed
+        # constant.
+        idaho = get_regional_skew("Idaho")
+        oregon = get_regional_skew("Oregon")
+        assert idaho is NATIONWIDE_FALLBACK
+        assert oregon is NATIONWIDE_FALLBACK
+
     def test_invalid_state_raises(self):
         with pytest.raises(ValueError):
             get_regional_skew("Not A State")

@@ -135,7 +135,64 @@ _STUDIES: List[RegionalSkewEstimate] = [
             "state-specific constant."
         ),
     ),
+    RegionalSkewEstimate(
+        value=NATIONWIDE_SKEW,
+        se=0.64,
+        source=(
+            "Parrett, C., and Johnson, D.R., 2004, Methods for estimating "
+            "flood frequency in Montana based on data through water year "
+            "1998: U.S. Geological Survey Water-Resources Investigations "
+            "Report 03-4308"
+        ),
+        source_url="https://pubs.usgs.gov/wri/wri03-4308",
+        states=["MT"],
+        note=(
+            "This study found the difference between Montana-specific and "
+            "Bulletin 17B nationwide generalized skew to be small and "
+            "probably not significant, so it kept the nationwide skew "
+            "value but recalibrated its standard error for Montana gages "
+            "to 0.64 (versus the published nationwide SE of 0.55) -- that "
+            "recalibrated SE is used here. Newer studies (SIR 2018-5046; "
+            "SIR 2025-5019, covering MT/ND/SD/WY) may supersede this -- "
+            "verify against the current USGS Flood Frequency Reports "
+            "index before use."
+        ),
+    ),
+    RegionalSkewEstimate(
+        value=NATIONWIDE_SKEW,
+        se=NATIONWIDE_SKEW_SE,
+        source=(
+            "U.S. Geological Survey, 2016, Magnitude, frequency, and "
+            "trends of floods at gaged and ungaged sites in Washington, "
+            "based on data through water year 2014 (ver. 1.1, October "
+            "2016): U.S. Geological Survey Scientific Investigations "
+            "Report 2016-5118"
+        ),
+        source_url="https://pubs.usgs.gov/sir/2016/5118/",
+        states=["WA"],
+        note=(
+            "No dedicated regional-skew study has been completed for "
+            "Washington; this report uses the nationwide generalized skew "
+            "from the U.S. Water Resources Council (1981) / Bulletin 17B. "
+            "Part of the state is also covered by SIR 2020-5073 (Columbia "
+            "River Basin regional skew models by flood duration), which "
+            "vary spatially and by duration rather than being a single "
+            "constant, so are not represented in this module -- verify "
+            "against the current USGS Flood Frequency Reports index "
+            "before use."
+        ),
+    ),
 ]
+
+# Idaho and Oregon are deliberately NOT included above: both use spatially
+# varying skew (Idaho: three separate maps selected by flood type -- snowmelt,
+# rainstorm, or mixed, per Kjelstrom and Moffatt, 1981, USGS Open-File Report
+# 81-909; Oregon: three "flood regions" in the western part of the state with
+# separate equations, per USGS SIR 2005-5116) rather than a single state-wide
+# constant, so they don't fit this module's (value, se) schema. Adding a
+# single fabricated number for either would be misleading. They currently
+# fall back to NATIONWIDE_FALLBACK; consult the cited reports (or the USGS
+# Flood Frequency Reports index) directly for a site-specific value.
 
 # USPS state/territory abbreviation -> full name, for input normalization
 # and for building UI pickers.
