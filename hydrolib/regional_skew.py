@@ -203,45 +203,143 @@ _STUDIES: List[RegionalSkewEstimate] = [
             "regional skew analysis)."
         ),
     ),
+    RegionalSkewEstimate(
+        value=-0.30,
+        se=0.14**0.5,
+        source=(
+            "U.S. Geological Survey, 2014, Methods for estimating annual "
+            "exceedance-probability discharges and largest recorded "
+            "floods for unregulated streams in rural Missouri: U.S. "
+            "Geological Survey Scientific Investigations Report 2014-5165"
+        ),
+        source_url="https://pubs.usgs.gov/sir/2014/5165/",
+        states=["MO"],
+        note=(
+            "Statewide constant regional skew from a Bayesian weighted "
+            "least-squares/generalized least-squares analysis of 108 "
+            "long-term gages (30+ years of record); 35 basin "
+            "characteristics were tested and none improved on the "
+            "constant model (MSE 0.14)."
+        ),
+    ),
+    RegionalSkewEstimate(
+        value=0.029,
+        se=0.297,
+        source=(
+            "U.S. Geological Survey, 1999, Estimating the Magnitude of "
+            "Peak Flows for Streams in Maine for Selected Recurrence "
+            "Intervals: U.S. Geological Survey Water-Resources "
+            "Investigations Report 99-4008"
+        ),
+        source_url="https://pubs.usgs.gov/publication/wri994008",
+        states=["ME"],
+        note=(
+            "Statewide constant regional skew with standard error of "
+            "prediction 0.297, given directly (not as an MSE) in the "
+            "source report."
+        ),
+    ),
+    RegionalSkewEstimate(
+        value=0.37,
+        se=0.14**0.5,
+        source=(
+            "U.S. Geological Survey, 2017, Methods for estimating "
+            "regional coefficient of skewness for unregulated streams in "
+            "New England: U.S. Geological Survey Scientific "
+            "Investigations Report 2017-5037"
+        ),
+        source_url="https://pubs.usgs.gov/publication/sir20175037",
+        states=["CT", "RI", "MA"],
+        note=(
+            "Constant regional skew for a Connecticut/Rhode "
+            "Island/Massachusetts study area (model error variance 0.13, "
+            "average variance of prediction at a new site 0.14, used here "
+            "as the MSE). Maine and New Hampshire have their own separate, "
+            "older, spatially-varying skew maps and are not part of this "
+            "constant."
+        ),
+    ),
+    RegionalSkewEstimate(
+        value=0.50,
+        se=0.574,
+        source=(
+            "U.S. Geological Survey, 2025, Estimation of magnitude and "
+            "frequency of floods for rural, unregulated streams in and "
+            "near Virginia and West Virginia: U.S. Geological Survey "
+            "Scientific Investigations Report 2025-5110"
+        ),
+        source_url="https://pubs.usgs.gov/publication/sir20255110",
+        states=["VA", "WV"],
+        note=(
+            "Constant regional skew for a study area covering parts of "
+            "the Mid-Atlantic and South-Atlantic-Gulf regions (average "
+            "variance of prediction 0.33, standard error 0.574 given "
+            "directly in the source); none of the explanatory variables "
+            "tested had enough predictive power to justify a "
+            "spatially-varying model. Part of western Maryland falls in "
+            "the same study region -- see the Maryland/Delaware entry in "
+            "this module's documentation for a separate, more localized "
+            "Eastern Coastal Plain estimate. Kentucky and Tennessee, "
+            "though grouped with Virginia and West Virginia in some "
+            "earlier USGS regional-skew work (Feaster and others, 2023), "
+            "are not confirmed to share this specific constant and are "
+            "not included here."
+        ),
+    ),
+    RegionalSkewEstimate(
+        value=NATIONWIDE_SKEW,
+        se=NATIONWIDE_SKEW_SE,
+        source=(
+            "U.S. Geological Survey, 2015, Regional regression equations "
+            "to estimate peak-flow frequency at sites in North Dakota "
+            "using data through 2009: U.S. Geological Survey Scientific "
+            "Investigations Report 2015-5096"
+        ),
+        source_url="https://pubs.usgs.gov/publication/sir20155096",
+        states=["ND"],
+        note=(
+            "This state study found the Bulletin 17B nationwide "
+            "generalized skew map provides accurate estimates for "
+            "natural-flow streams in North Dakota and recommends using "
+            "the nationwide value rather than a state-specific constant "
+            "(same conclusion as South Dakota's study)."
+        ),
+    ),
 ]
 
-# The following states were investigated but deliberately NOT included
-# above, because either no single citable numeric constant could be found,
-# or (more often in mountainous/western terrain) the state's own study
-# explicitly uses a spatially-varying skew rather than one constant, so it
-# doesn't fit this module's (value, se) schema. Adding a single fabricated
-# number for any of them would misrepresent the source study. They fall
-# back to NATIONWIDE_FALLBACK; consult the cited reports (or the USGS Flood
-# Frequency Reports index) directly for a site-specific value.
+# Every other state was investigated but deliberately NOT included above,
+# because either no single citable numeric constant could be found, or the
+# state's own study explicitly uses a spatially-varying skew (a map, a set
+# of regional zones, or a function of elevation/basin characteristics)
+# rather than one constant, so it doesn't fit this module's (value, se)
+# schema. Adding a single fabricated number for any of them would
+# misrepresent the source study, so they fall back to NATIONWIDE_FALLBACK.
 #
-#   Idaho    -- three separate skew maps selected by flood type (snowmelt,
-#               rainstorm, or mixed). Kjelstrom and Moffatt, 1981, USGS
-#               Open-File Report 81-909.
-#   Oregon   -- three "flood regions" in western Oregon with separate
-#               equations. USGS SIR 2005-5116.
-#   California -- regional skew is an explicit nonlinear function of mean
-#               basin elevation (-0.62 at 0 ft to 0.61 at 11,000 ft), not a
-#               constant. USGS SIR 2010-5260; duration-based skews in the
-#               Central Valley also vary by elevation and duration, USGS
-#               SIR 2012-5130.
-#   Wyoming  -- gages grouped into six hydrologic regions, each with its
-#               own generalized least-squares regression equations, not a
-#               single statewide constant. Miller, K.A., 2003, Peak-flow
-#               characteristics of Wyoming streams, USGS WRIR 03-4107.
-#   New Mexico -- generalized skew for the eastern part of the state (only)
-#               is a spatially-varying GAM-based surface, not a constant,
-#               shared with Texas and Oklahoma (USGS technique report,
-#               Texas/Oklahoma/eastern New Mexico); western New Mexico is
-#               not covered by that report at all.
-#   Nevada   -- covered only by USGS Water-Supply Paper 2433 (1997),
-#               "Methods for Estimating Magnitude and Frequency of Floods
-#               in the Southwestern United States"; no single statewide
-#               constant could be confirmed from available sources.
-#   Colorado -- USGS SIR 2009-5136 develops regional regression equations
-#               for Colorado streamflow statistics, but no single statewide
-#               regional-skew constant could be confirmed from available
-#               sources; Colorado's mix of plains and mountainous terrain
-#               makes a single constant unlikely.
+# A full state-by-state research table -- including states with a
+# spatially-varying model, states where a value was found but not a
+# matching standard error/MSE (e.g. Arkansas: -0.17; Hawaii: -0.14), and
+# states where nothing citable could be confirmed at all -- is maintained
+# outside this module (see the project's regional-skew research
+# deliverable). Consult the cited reports there, or the live USGS Flood
+# Frequency Reports index (https://www.usgs.gov/streamstats/science/
+# flood-frequency-reports), directly for a site-specific value.
+#
+# Representative examples of *why* a state is excluded rather than just
+# absent:
+#   Idaho, Oregon, Wyoming, California -- each uses several spatially
+#       distinct skew zones, or skew as an explicit function of basin
+#       elevation, rather than one statewide constant.
+#   New Mexico, Texas -- generalized skew is a spatially-varying
+#       GAM-based surface (shared multi-state report covering Texas,
+#       Oklahoma, and only the eastern part of New Mexico); western New
+#       Mexico is not covered by that report at all.
+#   New York, Pennsylvania, Maryland, Delaware -- a confirmed constant
+#       exists (e.g. 0.32 for eastern New York/Pennsylvania), but only for
+#       part of the state, so it is not representative of the whole state.
+#   Nevada, Colorado, Utah, New Jersey, Louisiana, Puerto Rico, and others
+#       -- a dedicated USGS report exists, but no single statewide
+#       constant (and/or its standard error) could be confirmed from
+#       available sources in this research pass.
 
 # USPS state/territory abbreviation -> full name, for input normalization
 # and for building UI pickers.

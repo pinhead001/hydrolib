@@ -103,6 +103,60 @@ class TestGetRegionalSkew:
         for state in ["New Mexico", "Nevada", "Utah", "Colorado", "Wyoming", "California"]:
             assert get_regional_skew(state) is NATIONWIDE_FALLBACK, state
 
+    def test_missouri_uses_statewide_constant(self):
+        mo = get_regional_skew("Missouri")
+        assert mo.value == pytest.approx(-0.30)
+        assert mo.mse == pytest.approx(0.14)
+
+    def test_maine_uses_statewide_constant(self):
+        me = get_regional_skew("Maine")
+        assert me.value == pytest.approx(0.029)
+        assert me.se == pytest.approx(0.297)
+
+    def test_new_england_multi_state_study_shared_across_states(self):
+        ct = get_regional_skew("CT")
+        ri = get_regional_skew("RI")
+        ma = get_regional_skew("MA")
+        assert ct is ri is ma
+        assert ct.value == pytest.approx(0.37)
+        assert ct.mse == pytest.approx(0.14)
+
+    def test_maine_and_new_hampshire_excluded_from_new_england_constant(self):
+        # Maine has its own separate constant (tested above); New Hampshire
+        # uses an older spatially-varying map, not the New England SIR
+        # 2017-5037 constant -- neither should be swept into the CT/RI/MA
+        # study.
+        assert get_regional_skew("Maine") is not get_regional_skew("CT")
+        assert get_regional_skew("New Hampshire") is NATIONWIDE_FALLBACK
+
+    def test_virginia_west_virginia_multi_state_study_shared(self):
+        va = get_regional_skew("VA")
+        wv = get_regional_skew("WV")
+        assert va is wv
+        assert va.value == pytest.approx(0.50)
+        assert va.se == pytest.approx(0.574)
+
+    def test_kentucky_and_tennessee_not_swept_into_va_wv_constant(self):
+        # Grouped with VA/WV in some earlier USGS work but not confirmed to
+        # share this specific constant.
+        assert get_regional_skew("Kentucky") is NATIONWIDE_FALLBACK
+        assert get_regional_skew("Tennessee") is NATIONWIDE_FALLBACK
+
+    def test_north_dakota_defers_to_nationwide_value_and_se(self):
+        nd = get_regional_skew("ND")
+        assert nd.value == NATIONWIDE_SKEW
+        assert nd.se == NATIONWIDE_SKEW_SE
+        assert nd is not NATIONWIDE_FALLBACK
+        assert "North Dakota" in nd.source
+
+    def test_arkansas_and_hawaii_not_added_without_confirmed_se(self):
+        # Both have a confirmed skew value (-0.17 and -0.14 respectively)
+        # but no confirmed standard error/MSE was found, so they are
+        # deliberately left out of the code dataset rather than paired
+        # with a guessed uncertainty.
+        assert get_regional_skew("Arkansas") is NATIONWIDE_FALLBACK
+        assert get_regional_skew("Hawaii") is NATIONWIDE_FALLBACK
+
     def test_invalid_state_raises(self):
         with pytest.raises(ValueError):
             get_regional_skew("Not A State")
