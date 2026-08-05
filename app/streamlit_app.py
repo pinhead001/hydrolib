@@ -35,6 +35,7 @@ from app.ffa_runner import (
 # Import hydrolib
 from hydrolib import Hydrograph
 from hydrolib.freq_plot import plot_frequency_curve_streamlit
+from hydrolib.regional_skew import NATIONWIDE_FALLBACK, STATE_NAMES, get_regional_skew
 from hydrolib.usgs import USGSgage
 
 st.set_page_config(
@@ -116,11 +117,50 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("Flood Frequency Analysis")
 enable_ffa = st.sidebar.checkbox("Enable Flood Frequency Analysis", value=False)
 if enable_ffa:
+    _NO_STATE_OPTION = "Nationwide (no state selected)"
+    _state_options = [_NO_STATE_OPTION] + sorted(STATE_NAMES.values())
+
+    def _apply_state_skew():
+        selected = st.session_state.ffa_state_select
+        estimate = (
+            NATIONWIDE_FALLBACK if selected == _NO_STATE_OPTION else get_regional_skew(selected)
+        )
+        st.session_state.regional_skew_input = round(estimate.value, 3)
+        st.session_state.regional_skew_se_input = round(estimate.se, 3)
+
+    selected_state = st.sidebar.selectbox(
+        "State (for regional skew lookup)",
+        _state_options,
+        key="ffa_state_select",
+        on_change=_apply_state_skew,
+    )
+    sidebar_help(
+        "State (for regional skew lookup)",
+        "Auto-fills Regional Skew / SE below from a small starter set of "
+        "published USGS state regional-skew studies. Most states aren't "
+        "covered yet and fall back to the nationwide Bulletin 17B default. "
+        "Not a substitute for checking the current study for your site at "
+        "usgs.gov/streamstats/science/flood-frequency-reports",
+    )
+    _active_estimate = (
+        NATIONWIDE_FALLBACK
+        if selected_state == _NO_STATE_OPTION
+        else get_regional_skew(selected_state)
+    )
+    st.sidebar.caption(f"Source: {_active_estimate.source}")
+    if _active_estimate.note:
+        st.sidebar.caption(_active_estimate.note)
+
+    if "regional_skew_input" not in st.session_state:
+        st.session_state.regional_skew_input = -0.302
+    if "regional_skew_se_input" not in st.session_state:
+        st.session_state.regional_skew_se_input = 0.55
+
     regional_skew = st.sidebar.number_input(
         "Regional Skew",
-        value=-0.302,
         step=0.001,
         format="%.3f",
+        key="regional_skew_input",
     )
     sidebar_help(
         "Regional Skew",
@@ -130,9 +170,9 @@ if enable_ffa:
     )
     regional_skew_se = st.sidebar.number_input(
         "Regional Skew SE",
-        value=0.55,
         step=0.01,
         format="%.2f",
+        key="regional_skew_se_input",
     )
     sidebar_help(
         "Regional Skew SE",
