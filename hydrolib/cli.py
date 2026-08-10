@@ -53,5 +53,31 @@ def benchmark(fmt: str) -> None:
         click.echo(generate_text_report(results))
 
 
+@cli.command()
+@click.argument("state")
+def skew(state: str) -> None:
+    """Look up the USGS regional (generalized) skew estimate for STATE.
+
+    STATE may be a full name (e.g. "Vermont") or USPS abbreviation (e.g. "VT").
+    States without a dedicated study print the nationwide Bulletin 17B
+    fallback instead.
+    """
+    from hydrolib.regional_skew import get_regional_skew
+
+    try:
+        estimate = get_regional_skew(state)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(f"State: {state}")
+    click.echo(f"Regional skew: {estimate.value:.3f}")
+    click.echo(f"Standard error: {estimate.se:.3f}")
+    click.echo(f"MSE: {estimate.mse:.3f}")
+    click.echo(f"Source: {estimate.source}")
+    click.echo(f"Source URL: {estimate.source_url}")
+    if estimate.note:
+        click.echo(f"Note: {estimate.note}")
+
+
 if __name__ == "__main__":
     cli()

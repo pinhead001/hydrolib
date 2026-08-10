@@ -895,6 +895,54 @@ class Bulletin17C:
         self._analyzer: Optional[FloodFrequencyAnalysis] = None
         self._results: Optional[FrequencyResults] = None
 
+    @classmethod
+    def from_state(
+        cls,
+        peak_flows: np.ndarray,
+        state: str,
+        water_years: np.ndarray = None,
+        regional_skew: float = None,
+        regional_skew_mse: float = None,
+        historical_peaks: List[Tuple[int, float]] = None,
+        perception_thresholds: Dict[Tuple[int, int], float] = None,
+        ema_params: EMAParameters = None,
+    ) -> "Bulletin17C":
+        """
+        Build a Bulletin17C analysis using a looked-up state regional skew.
+
+        Parameters
+        ----------
+        peak_flows : array-like
+            Annual peak flows.
+        state : str
+            Full state/territory name or USPS abbreviation (case-insensitive),
+            looked up via :func:`hydrolib.regional_skew.get_regional_skew`.
+            States without a dedicated study fall back to the nationwide
+            Bulletin 17B value.
+        regional_skew, regional_skew_mse : float, optional
+            Explicit overrides. If given, used instead of the value looked
+            up for ``state``.
+
+        Examples
+        --------
+        >>> b17c = Bulletin17C.from_state(peak_flows, state="Vermont")
+        >>> results = b17c.run_analysis(method="ema")
+        """
+        from .regional_skew import get_regional_skew
+
+        estimate = get_regional_skew(state)
+        return cls(
+            peak_flows,
+            water_years=water_years,
+            regional_skew=regional_skew if regional_skew is not None else estimate.value,
+            regional_skew_mse=(
+                regional_skew_mse if regional_skew_mse is not None else estimate.mse
+            ),
+            historical_peaks=historical_peaks,
+            perception_thresholds=perception_thresholds,
+            ema_params=ema_params,
+        )
+
     @property
     def results(self) -> Optional[FrequencyResults]:
         return self._results

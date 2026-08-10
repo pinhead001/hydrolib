@@ -190,6 +190,43 @@ class TestBulletin17C:
         assert b17c.quantiles is not None
 
 
+class TestFromState:
+    def test_looks_up_regional_skew_by_state(self, synthetic_peaks):
+        """from_state should populate regional_skew/mse from the lookup."""
+        b17c = Bulletin17C.from_state(synthetic_peaks, state="Vermont")
+        assert b17c._regional_skew == pytest.approx(0.44)
+        assert b17c._regional_skew_mse == pytest.approx(0.078)
+
+    def test_accepts_abbreviation(self, synthetic_peaks):
+        """State can be passed as a USPS abbreviation too."""
+        b17c = Bulletin17C.from_state(synthetic_peaks, state="VT")
+        assert b17c._regional_skew == pytest.approx(0.44)
+
+    def test_unlisted_state_uses_nationwide_fallback(self, synthetic_peaks):
+        """States without a dedicated study fall back to the nationwide value."""
+        b17c = Bulletin17C.from_state(synthetic_peaks, state="California")
+        assert b17c._regional_skew == pytest.approx(-0.302)
+        assert b17c._regional_skew_mse == pytest.approx(0.55**2)
+
+    def test_explicit_regional_skew_overrides_lookup(self, synthetic_peaks):
+        """An explicit regional_skew/mse should win over the state lookup."""
+        b17c = Bulletin17C.from_state(
+            synthetic_peaks, state="Vermont", regional_skew=-0.1, regional_skew_mse=0.2
+        )
+        assert b17c._regional_skew == pytest.approx(-0.1)
+        assert b17c._regional_skew_mse == pytest.approx(0.2)
+
+    def test_runs_analysis_like_a_normal_instance(self, synthetic_peaks):
+        """The resulting instance should behave like a regular Bulletin17C."""
+        b17c = Bulletin17C.from_state(synthetic_peaks, state="Arizona")
+        results = b17c.run_analysis(method="ema")
+        assert results.skew_used is not None
+
+    def test_invalid_state_raises(self, synthetic_peaks):
+        with pytest.raises(ValueError):
+            Bulletin17C.from_state(synthetic_peaks, state="Not A State")
+
+
 # Edge cases
 class TestEdgeCases:
     def test_small_sample(self):
