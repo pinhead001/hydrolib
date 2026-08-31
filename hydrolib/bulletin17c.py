@@ -43,6 +43,11 @@ class _ExpectedSums(NamedTuple):
     Summing everything first and correcting once applies a small-sample
     correction to information that is not there.
 
+    ``n_exact`` therefore does double duty: it selects which sums the
+    correction multiplies, and under the Fortran's default convention it is
+    also what the correction is computed *from*. See
+    :func:`_bias_correction_factors`.
+
     Attributes
     ----------
     n : int
@@ -86,6 +91,57 @@ logger = logging.getLogger(__name__)
 # emafit.f:763 -- the Halloween determinant ratio applies only above this
 # at-site skew magnitude; below it the Fortran sets Wd = 1 outright.
 _HWN_SKEW_FLOOR = 0.04
+
+
+def _bias_correction_factors(n_exact: int) -> Tuple[float, float]:
+    """Small-sample bias corrections c2 and c3, from the *exact-peak* count.
+
+    ``moms_p3`` reads which convention to use from ``common /tac002/``, and
+    the blockdata default is ``data bcf/1997/`` (``emafit.f``, line 3898) --
+    the Cohn and others (1997) factors, built from ``n_e``, the number of
+    exactly observed peaks (``emafit.f``, line 1407)::
+
+        if(bcf .eq. 1997) then
+          n_bcf = n_e
+          c2    = n_bcf/(n_bcf-1.d0)
+          c3    = (n_bcf**2)/((n_bcf-1.d0)*(n_bcf-2.d0))
+
+    The Griffis and others (2004) alternative, which uses the total interval
+    count, is the branch immediately below it and is commented out at
+    ``emafit.f`` line 3899. This code used the total count for a long time,
+    which is only visible on a censored record: with nothing censored
+    ``n_e == n`` and the two conventions are identical, which is why Powder
+    River was exact and why no test separated them. Measured against the
+    ``moms_p3`` oracle, correcting it takes Cains Coulee's at-site skew from
+    -0.830 to -0.708 against a reference -0.70789, and Big Sandy's from
+    +0.00196 to +0.00675 against +0.00660.
+
+    Only the *factors* come from ``n_e``. The divisor in ``moms_p3``'s
+    variance line is the total interval count; see :meth:`_ema_iteration`.
+
+    Parameters
+    ----------
+    n_exact : int
+        Number of exactly observed peaks -- intervals with ``ql == qu``.
+
+    Returns
+    -------
+    tuple of float
+        ``(c2, c3)``. Both are 1.0 when there are fewer than three exact
+        peaks, which is the Fortran's "no bias correction" branch (any ``bcf``
+        other than 1997 or 2004). ``moms_p3`` has no such guard and would
+        divide by zero; a record with two or fewer exact peaks reaches this
+        code through hydrolib's own low-data paths, so it needs one.
+    """
+    if n_exact < 3:
+        logger.debug(
+            "only %d exactly observed peaks; skipping the small-sample bias "
+            "correction, as the Fortran's bcf = 0 branch does",
+            n_exact,
+        )
+        return 1.0, 1.0
+    n = float(n_exact)
+    return n / (n - 1.0), n**2 / ((n - 1.0) * (n - 2.0))
 
 
 def _b17b_skew_mse(n: int, skew: float) -> float:
@@ -974,14 +1030,20 @@ class ExpectedMomentsAlgorithm(FloodFrequencyAnalysis):
             moms(3) = (c3*s_e(3) + s_c(3) + nG*rG*moms(2)**1.5) /
                       ((n + nG)*moms(2)**1.5)
 
-        Two things follow that this method used to get wrong. The bias
+        Three things follow that this method used to get wrong. The bias
         corrections c2 and c3 apply to the exact peaks only, not to the
-        expected moments of censored intervals. And the regional skew enters
-        *here*, inside the fixed point, as ``nG`` pseudo-observations at value
-        ``rG`` -- it is not a weighted average taken after the fit converges.
-        That distinction is the whole difference: because the skew feeds the
-        P3 distribution used to compute the next round of expected moments,
-        weighting inside the loop moves the mean and variance as well.
+        expected moments of censored intervals. They are also *built* from
+        the exact-peak count -- see :func:`_bias_correction_factors`. And the
+        regional skew enters *here*, inside the fixed point, as ``nG``
+        pseudo-observations at value ``rG`` -- it is not a weighted average
+        taken after the fit converges. That distinction is the whole
+        difference: because the skew feeds the P3 distribution used to compute
+        the next round of expected moments, weighting inside the loop moves
+        the mean and variance as well.
+
+        Note the asymmetry in the variance line, which is deliberate and
+        matches the Fortran: c2 is built from the exact-peak count, but the
+        divisor is the *total* interval count ``n``.
         """
         sums = self._compute_ema_moments(mean_log, std_log, skew)
         n = sums.n
@@ -990,12 +1052,11 @@ class ExpectedMomentsAlgorithm(FloodFrequencyAnalysis):
         new_mean = total_1 / n
 
         (se2, se3), (sc2, sc3) = sums.central(new_mean)
-        c2 = n / (n - 1.0)
+        c2, c3 = _bias_correction_factors(sums.n_exact)
         var = (c2 * se2 + sc2) / n
         new_std = np.sqrt(max(var, 1e-10))
 
         if n > 2:
-            c3 = n**2 / ((n - 1.0) * (n - 2.0))
             sigma3 = new_std**3
             rg = self._regional_skew if self._regional_skew is not None else 0.0
             new_skew = (c3 * se3 + sc3 + n_regional * rg * sigma3) / ((n + n_regional) * sigma3)

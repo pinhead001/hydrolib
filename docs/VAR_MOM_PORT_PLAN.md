@@ -1,6 +1,6 @@
 # Plan — closing the open numerical defects (TODO.md P3)
 
-Status: plan only, nothing here is implemented yet.
+Status: **Phase 0 landed**; Phases 1-7 not started.
 Written 2026-08-31 against `claude/todo-open-items-var-mom-709p3m`.
 
 TODO.md P3 lists three open numerical items — weighted skew, the ADJE at-site skew MSE,
@@ -100,7 +100,7 @@ than through `emafitpr`'s ~1e13-conditioned fixed point.
 Estimates are for someone who has read the Fortran. Each phase ends green, so the sequence
 can stop at any phase boundary without leaving the tree broken.
 
-### Phase 0 — bias-correction factor (½ day)
+### Phase 0 — bias-correction factor (½ day) — **DONE**
 
 **Change.** In `_ema_iteration`, build `c2`/`c3` from `sums.n_exact` rather than `n`. Keep
 the divisor `n` — `moms(2) = (c2*s_e(2) + s_c(2))/n` uses the total. Guard `n_exact < 3`,
@@ -122,6 +122,31 @@ case asserting equality to ~1e-9 instead of today's "0.7% variance, 4.9% skew" b
 
 **Trap.** `_ExpectedSums.central()` already splits exact from censored correctly and needs no
 change. The bug is only in the two coefficients.
+
+**What actually happened.** The change landed as `_bias_correction_factors`, a module-level
+helper, so the `n_exact < 3` guard and its provenance have somewhere to live. Exactly two
+tests failed, both predicted: the oracle's censored-divergence assertion (now an equality
+test at 1e-8, measured 1.7e-10) and the Cains Coulee `skew_at_site` XPASS. Nothing else in
+the suite moved.
+
+The tolerance re-measurement was the larger half of the work, and it found the thing worth
+recording. Big Sandy's `std_log` error fell 4x and its at-site skew is now 1.4e-4 off, but
+**three quantile bounds tightened their margin instead of loosening it** — Big Sandy's Q100
+went 0.88% → 1.59% and Cains Coulee's 2.7% → 4.7%. Both are downstream of the weighted skew,
+which still lacks ADJE and `Wd`: a *correct* at-site skew feeds a still-wrong `nG`, so the
+fit gets further from peakfq's quantiles before Phases 4-5 bring it back. No bound was
+widened. Three now sit at 1.06-1.19x headroom and were left there deliberately.
+
+Measured, for comparison against later phases:
+
+| | Big Sandy | Powder River | Cains Coulee |
+|---|---:|---:|---:|
+| mean_log | 0.015% | 0.000% | 0.0064 abs |
+| std_log | 0.218% | 0.000% | 3.05% |
+| at-site skew | 1.4e-4 | 0.0 | 2.0e-5 |
+| weighted skew | 0.0407 | 0.0 | 0.1243 |
+| worst quantile | 2.82% @ 0.002 | 0.10% @ 0.002 | 21.1% @ 0.995 |
+| Q100 | 1.59% | 0.04% | 4.69% |
 
 ### Phase 1 — extend the oracle surface (½ day)
 

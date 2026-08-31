@@ -232,13 +232,21 @@ def register_benchmarks() -> None:
             continue
         # Tolerances are measured, not guessed, on Big Sandy against the
         # peakfq 8.1.0 reference with the same censored record:
-        #   parameters  mean 0.05%, standard deviation 0.88%  -> 1%
-        #   quantiles   0.12% at the 4% AEP, 4.70% at 0.995   -> 5%
-        #   CI bounds   0.80% at the 50% AEP, 11.62% at 1%    -> 15%
+        #   parameters  mean 0.015%, standard deviation 0.218%  -> 1%
+        #   quantiles   0.009% at the 10% AEP, 2.83% at 0.002   -> 5%
+        #   CI bounds   3.71% at the 10% AEP, 11.17% at 1%      -> 15%
         # The quantile and CI bounds are set by the two open parity defects
         # (TODO.md P3), not by slack in the fit -- the CI residual is interval
         # shape, symmetric here and right-skewed in the Fortran. Tighten both
         # when those land.
+        #
+        # Remeasured after the bias-correction fix (bcf = 1997; see
+        # bulletin17c._bias_correction_factors). Both parameters improved --
+        # the standard deviation by 4x -- and the quantile worst case fell from
+        # 4.70% to 2.83%, but it moved from the upper tail to the lower one:
+        # the far tail is now driven by the weighted skew, which is still
+        # missing ADJE and Wd. Left at 5% and 15% rather than tightened, since
+        # docs/VAR_MOM_PORT_PLAN.md phases 4-6 will move all three again.
         BENCHMARKS[case["name"]] = _benchmark_from_case(
             case,
             tolerance_pct=5.0,

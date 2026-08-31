@@ -14,9 +14,11 @@ They also record two things the oracles found immediately:
 
 * ``_b17b_skew_mse`` matches the Fortran's ``mseg()`` exactly up to n = 150 and
   diverges above it, because ADJE's bias adjustment partially undoes the cap.
-* ``_ema_iteration`` reproduces ``moms_p3`` exactly on uncensored rows, and
-  diverges only where intervals are censored -- which places the remaining
-  error in the truncated-moment code, not in the transcribed formulas.
+* ``_ema_iteration`` diverged from ``moms_p3`` on censored rows only, which was
+  first read as a defect in the truncated-moment code and turned out to be the
+  bias-correction convention -- ``bcf = 1997`` builds c2 and c3 from the
+  exact-peak count. Fixed; both tests below are now equality tests, and the
+  contrast between them is what localised it.
 """
 
 from __future__ import annotations
@@ -236,19 +238,29 @@ class TestMomentIterationOracle:
         assert n_censored == 0, "this case should have no censored intervals here"
         assert np.allclose(fortran, mine, rtol=0.0, atol=1e-9)
 
-    def test_censored_rows_are_where_it_diverges(self):
-        """Cains Coulee censors 11 of 32, and only then do the two disagree.
+    def test_exact_on_censored_rows_too(self):
+        """Cains Coulee censors 11 of 32, and the two agree there as well.
 
-        Measured: mean still exact to 7e-11, variance 0.70% apart, skew 4.94%.
-        Since the formulas are exact without censoring, the residual is in the
-        expected moments of censored intervals -- hydrolib's truncated-P3 code,
-        not the moms_p3 transcription. That is the next thing the port fixes.
+        This test used to assert the opposite -- a 0.70% variance gap and a
+        4.94% skew gap -- and concluded from it that hydrolib's truncated-P3
+        moment code was wrong on censored intervals. It was not. ``moms_p3``
+        reads its bias-correction convention from ``common /tac002/``, whose
+        blockdata default is ``data bcf/1997/`` (``emafit.f:3898``): c2 and c3
+        are built from the *exact-peak* count, not the total. ``n_e == n``
+        whenever nothing is censored, which is why the uncensored case above
+        passed throughout and why nothing here could see the difference.
+
+        With :func:`_bias_correction_factors` fixed, the measured differences
+        are ~7e-11 on the mean, 1.7e-10 on the variance and ~2e-10 on the
+        skew. The bound below is 1e-8.
+
+        What that leaves for the ``var_mom`` port is the skew *weighting*
+        path -- the ADJE bias adjustment and the determinant ratio -- not the
+        moment code. See ``docs/VAR_MOM_PORT_PLAN.md``.
         """
         fortran, mine, n_censored = self._compare(self._fit("cains_coulee_06327450"))
-        assert n_censored == 11
-        assert abs(fortran[0] - mine[0]) < 1e-8, "the mean should still agree"
-        assert 0.001 < abs(fortran[1] / mine[1] - 1) < 0.05, "variance gap ~0.7%"
-        assert 0.01 < abs(fortran[2] / mine[2] - 1) < 0.10, "skew gap ~4.9%"
+        assert n_censored == 11, "this case should censor 11 of its 32 rows"
+        assert np.allclose(fortran, mine, rtol=0.0, atol=1e-8), f"{fortran!r} vs {mine!r}"
 
 
 class TestVarianceOfMomentsOracle:

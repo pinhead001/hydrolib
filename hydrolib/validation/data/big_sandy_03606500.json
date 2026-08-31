@@ -151,7 +151,7 @@
     }
   },
   "known_deviations": {
-    "skew_weighted": "peakfq 8.1.0 weights skew by the Halloween method (HWN), an optimized adjustment factor for censored records; hydrolib uses standard Bulletin 17C weighting. -0.1009 vs -0.1563. Open: TODO.md P3.",
-    "skew_at_site": "Follows from the same weighting difference. The reference at-site skew is 0.0066, near enough zero that percent difference is not a useful measure of the gap. Open: TODO.md P3."
+    "skew_weighted": "peakfq 8.1.0 weights skew by the Halloween method (HWN), whose at-site skew MSE carries the ADJE censoring bias adjustment and whose Wd comes from detrat; hydrolib implements neither, so it under-weights the regional skew on a censored record. -0.1157 vs -0.1563, 26%. Open: TODO.md P3, docs/VAR_MOM_PORT_PLAN.md phases 4-5.",
+    "skew_at_site": "No longer a deviation. The reference at-site skew is 0.006601 and hydrolib now gives 0.006746, a gap of 1.4e-4, since the moment bias-correction factors were corrected to the exact-peak count (bcf = 1997). Kept as a key because percent difference remains a poor measure this close to zero -- compare it absolutely."
   }
 }

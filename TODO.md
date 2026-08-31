@@ -2,15 +2,17 @@
 
 ## Status
 Last updated: 2026-08-31
-Tests: **463 passed, 1 deselected, 7 xfailed** in ~38 s (was ~75 s for far fewer tests; see
-the MGBT memoization below). CI green on main. Two of the seven xfails are new, both on the
-Cains Coulee parity case; see P3.
+Tests: **473 passed, 1 deselected, 6 xfailed** in ~38 s with the Fortran extension built (was
+~75 s for far fewer tests; see the MGBT memoization below). CI green on main. One xfail was
+retired by the bias-correction fix; the six that remain are all the skew-weighting and
+CI-shape defects in P3.
 Fortran reference: **vendored** at `vendor/peakfqr/` (peakfq 8.1.0, CC0).
 Fortran bridge: builds from those sources via `python build_fortran/build.py`
 (gfortran + meson) and is now **built and checked in CI** by `make parity`.
 
 Every P1 and P2 item is done. What is left is P3: two numerical defects that turn out to be
-the same missing machinery, specified precisely below.
+the same missing machinery, specified precisely below, and planned phase by phase in
+`docs/VAR_MOM_PORT_PLAN.md`. Phase 0 of that plan has landed.
 
 ---
 
@@ -39,36 +41,17 @@ Wyoming/Montana parity cases were added for exactly this question:
 | case | censoring | reference `Wd` | native vs peakfq 8.1.0 |
 |---|---|---:|---|
 | Powder River 06326500 | none | 1.0 | mean **0.0**, sd **3.7e-14**, at-site skew **4.5e-12**, weighted skew **7.5e-11**; quantiles ≤ 0.10% |
-| Cains Coulee 06327450 | 11 PILFs from MGBT | **0.184** | at-site skew 0.122, weighted skew 0.098; quantiles 0.30% to 18.7%, 2.7% at Q100 |
+| Cains Coulee 06327450 | 11 PILFs from MGBT | **0.184** | at-site skew **2e-5** (was 0.122), weighted skew 0.124; quantiles to 21.1%, 4.7% at Q100 |
 
 So with nothing censored the native EMA reproduces peakfq to machine precision — the in-loop
 regional-skew weighting is *right*, not merely closer. Everything that remains is
 censored-path work. Cains Coulee is also the first case in the repository where `detrat`
 actually bites, so it is the oracle for that routine.
 
-- [ ] **Fix the moment bias-correction factor first — it is not part of the port.**
-      `moms_p3` reads `bcf` from `common /tac002/`, and the blockdata default is
-      `data bcf/1997/` (`emafit.f:3898`), which builds `c2`/`c3` from `n_bcf = n_e`, the
-      count of **exactly observed** peaks (`emafit.f:1407`). `_ema_iteration` uses the total
-      interval count — the `bcf = 2004` branch, commented out one line below the default.
-      With nothing censored the two are identical, which is why Powder River is exact and
-      why no existing test separates them.
-
-      Prototyped (monkey-patched `_ema_iteration`, nothing else changed):
-
-      | case | quantity | current | `n_bcf = n_e` | peakfq 8.1.0 |
-      |---|---|---:|---:|---:|
-      | Cains Coulee | at-site skew | −0.82996 | **−0.70791** | −0.70789 |
-      | Big Sandy | at-site skew | +0.00196 | **+0.00675** | +0.00660 |
-      | Big Sandy | `std_log` | 0.634% | **0.218%** | 0.291043 |
-      | Powder River | every moment | exact | exact | — |
-
-      One line, and it retires the `skew_at_site` half of the Cains Coulee
-      `xfail(strict=True)`. It must land **before** the port: `mseg_all`, `detrat`,
-      `var_mom` and `regmoms` are all evaluated at the at-site moments, so porting them
-      against an at-site skew that is 0.12 wrong means calibrating against a poisoned input.
-      Expect the weighted skew and Q100 to move slightly the wrong way until Phases 4-5 of
-      the plan land — that is the missing ADJE and `Wd`, not a regression.
+- [x] **The moment bias-correction factor is fixed** — see the Done section. It was not part
+      of the port, and it removes the censored-path moment error entirely: `_ema_iteration`
+      now reproduces `moms_p3` to 1e-10 on censored rows as well as uncensored ones. What is
+      left below is the skew *weighting* path alone.
 
 - [ ] **Port `var_mom` and the routines it needs.** ~1,100 lines of Fortran in `emafit.f`
       alone, plus `CHOL33` (`probfun.f`), `DLGINV` (`imslfake.f`), and `expmomderiv`, `m2mn`,
@@ -123,7 +106,9 @@ actually bites, so it is the oracle for that routine.
 - [ ] **Skew weighting — 24% left, and it is all `as_G_mse`.** The structural half is done
       (see below): the regional skew is now folded into the EMA fixed point as `moms_p3`
       does it, which took Big Sandy from 35% to **24.1%** (−0.1187 against peakfq's −0.1563)
-      and improved the mean and variance at the same time.
+      and improved the mean and variance at the same time. The bias-correction fix then moved
+      it to −0.1157, a 26% gap — slightly *worse*, because a correct at-site skew feeds a
+      still-wrong `nG`. The remaining 26% is `as_G_mse` and nothing else.
 
       All of the remainder is one input. peakfq's default `at_site_option` is `ADJE`
       (`emafit.f:3888`): `as_G_mse = bias_adj * mseg(min(n,150), G)`, where `bias_adj` is the
@@ -285,6 +270,42 @@ done — see the P3 table above and the Done section.)
 - [x] **`Benchmark.run_native()` dropped the perception thresholds**, comparing a
       systematic-only fit against the reference's censored one and calling the modelling
       difference an error.
+
+### The moment bias-correction factor
+
+- [x] **`c2` and `c3` come from the exact-peak count, not the total.** `moms_p3` reads the
+      convention from `common /tac002/`, and the blockdata default is `data bcf/1997/`
+      (`emafit.f:3898`) — the Cohn and others (1997) factors, built from `n_e`
+      (`emafit.f:1407`). The Griffis 2004 alternative that uses the total interval count is
+      the branch commented out one line below the default, and it is what `_ema_iteration`
+      had been using. `n_e == n` whenever nothing is censored, so no uncensored case could
+      ever show it — which is exactly why Powder River was exact and why the `moms_p3`
+      oracle test passed throughout.
+
+      Found by backing the per-interval non-central moments out of `moms_p3` and comparing
+      them against `_compute_ema_moments`: with `n_bcf = n_e` they agree to ~1e-12. So
+      hydrolib's truncated-P3 moment code was already exact, and the earlier reading of this
+      symptom — that the port had to replace that code — was wrong. Recorded here because
+      the wrong diagnosis sat in this file for a while and cost planning time.
+
+      | case | quantity | before | after | peakfq 8.1.0 |
+      |---|---|---:|---:|---:|
+      | Cains Coulee | at-site skew | −0.82996 | **−0.70791** | −0.70789 |
+      | Big Sandy | at-site skew | +0.00196 | **+0.00675** | +0.00660 |
+      | Big Sandy | `std_log` | 0.634% | **0.218%** | 0.291043 |
+      | Powder River | every moment | exact | exact | — |
+
+      Retires the Cains Coulee at-site-skew `xfail(strict=True)`; that parametrisation is
+      split so the weighted skew stays marked. `_bias_correction_factors` guards
+      `n_exact < 3` and falls back to no correction, the Fortran's `bcf = 0` branch —
+      `moms_p3` has no such guard and would divide by zero.
+
+      Two tail quantiles moved the *wrong* way and were re-measured rather than smoothed
+      over: Big Sandy's Q100 error went 0.88% → 1.59% and Cains Coulee's 2.7% → 4.7%. Both
+      are downstream of the weighted skew, which still lacks ADJE and `Wd`; correcting the
+      at-site skew feeds a still-wrong `nG`. No tolerance was widened. Three bounds now sit
+      at 1.06–1.19x headroom and are left there deliberately, so they alarm on anything else
+      that shifts.
 
 ### Per-routine oracles for the port
 

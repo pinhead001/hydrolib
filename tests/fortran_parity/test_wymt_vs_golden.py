@@ -18,8 +18,14 @@ What does censoring cost?
     0.0066. hydrolib has no ``detrat``, so it uses 1.
 
 Read together they localise the open P3 defect precisely: with no censoring
-the native fit is exact, and everything that remains is censored-path work --
-the ADJE bias adjustment on the at-site skew MSE, and ``detrat`` itself.
+the native fit is exact, and everything that remains is censored-path work.
+That contrast has already paid for itself once. Cains Coulee's at-site skew
+was 0.122 off and is now 2e-5 off, because the pair of cases isolated the
+cause to the moment bias-correction convention -- ``moms_p3`` builds c2 and c3
+from the exact-peak count (``bcf = 1997``, ``emafit.f:3898``) and hydrolib used
+the total interval count, which is invisible on an uncensored record. What is
+left is the skew *weighting*: the ADJE bias adjustment on the at-site skew MSE,
+and ``detrat`` itself.
 
 The peakfq 7.4 columns in the fixture CSVs are a sanity cross-check only.
 Parity is against the committed goldens, generated from the vendored 8.1.0
@@ -143,13 +149,16 @@ class TestPowderRiverUncensored:
 
 
 class TestCainsCouleeCensored:
-    """USGS 06327450, 1991-2022. MGBT censors 11 peaks, and the fit diverges.
+    """USGS 06327450, 1991-2022. MGBT censors 11 peaks, and the skew weighting diverges.
 
     Everything discrete matches: the same 11 PILFs at the same 332 cfs cut.
-    What does not match is what the censoring then does to the moments, and
-    the reference ``Wd`` of 0.184 is a large part of why -- hydrolib has no
-    ``detrat`` and uses 1, so it weights the regional skew far more heavily
-    than peakfq does here.
+    So does the at-site fit now -- its skew agrees to 2e-5, since the moment
+    bias-correction factors were corrected to the exact-peak count.
+
+    What does not match is the *weighted* skew, and the reference ``Wd`` of
+    0.184 is most of why: hydrolib has no ``detrat`` and uses 1, so it weights
+    the regional skew more than fivefold too heavily here. The at-site skew
+    MSE's ADJE adjustment is the rest.
     """
 
     def test_mgbt_finds_the_same_pilfs(self, cains_coulee):
@@ -168,30 +177,49 @@ class TestCainsCouleeCensored:
         results, ref = cains_coulee
         assert abs(results.mean_log - ref["mean_log"]) < 0.01
 
+    def test_at_site_skew_matches(self, cains_coulee):
+        """Was xfail at a gap of 0.122; now agrees to 2e-5.
+
+        The gap was the moment bias-correction convention, not the censored
+        moment code: ``moms_p3`` builds c2 and c3 from the exact-peak count
+        (``bcf = 1997``, ``emafit.f:3898``) and hydrolib used the total
+        interval count. Since ``n_e == n`` without censoring, this 11-PILF
+        record is the only parity case that could ever have shown it.
+
+        The *weighted* skew is a separate defect and is still xfail below.
+        """
+        results, ref = cains_coulee
+        assert abs(results.skew_station - ref["skew_at_site"]) < 0.02
+
     @pytest.mark.xfail(
         strict=True,
         reason=(
-            "Censored-path defect. peakfq's at-site skew MSE uses the ADJE "
-            "censoring bias adjustment (from var_mom, not ported) and its Wd "
-            "comes from detrat (also not ported, and 0.184 here against the 1 "
-            "hydrolib assumes). Measured gap 0.122 on the at-site skew and "
-            "0.098 on the weighted skew. See TODO.md P3."
+            "Skew-weighting defect, and the last one on this case. peakfq's "
+            "at-site skew MSE uses the ADJE censoring bias adjustment (from "
+            "var_mom, not ported) and its Wd comes from detrat (also not "
+            "ported, and 0.184 here against the 1 hydrolib assumes). Measured "
+            "gap 0.124 on the weighted skew, against an at-site skew that now "
+            "matches to 2e-5. See docs/VAR_MOM_PORT_PLAN.md phases 4 and 5."
         ),
     )
-    @pytest.mark.parametrize("field", ["skew_at_site", "skew_weighted"])
-    def test_skew_matches(self, cains_coulee, field):
+    def test_weighted_skew_matches(self, cains_coulee):
         results, ref = cains_coulee
-        native = {
-            "skew_at_site": results.skew_station,
-            "skew_weighted": results.skew_weighted,
-        }[field]
-        assert abs(native - ref[field]) < 0.02
+        assert abs(results.skew_weighted - ref["skew_weighted"]) < 0.02
 
     def test_quantile_error_is_bounded_and_worst_in_the_lower_tail(self, cains_coulee):
-        """Recorded, not asserted away: 0.30% at best, 18.7% at worst, 2.7% at Q100.
+        """Recorded, not asserted away: 21.07% at worst (AEP 0.995), 4.69% at Q100.
 
         The lower tail is where the censoring bites, which is the signature of
         the open defect rather than of a broken fit.
+
+        Both moved the wrong way with the bias-correction fix -- 18.7% and
+        2.7% before it -- and both are downstream of the weighted skew, which
+        is still 0.124 off while the at-site skew is now 2e-5 off. Correcting
+        the at-site skew moves ``nG`` through ``_b17b_skew_mse``, so a fit that
+        is right about the at-site moments is *further* from peakfq's quantiles
+        until ``detrat`` and ADJE land. The bounds are unchanged rather than
+        widened; at 1.19x and 1.07x of headroom they will alarm on anything
+        else that shifts, which is what they are for.
         """
         results, ref = cains_coulee
         errors = _quantile_errors(results, ref)

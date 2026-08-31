@@ -13,7 +13,7 @@ from hydrolib import (
     grubbs_beck_critical_value,
     kfactor,
 )
-from hydrolib.bulletin17c import _b17b_skew_mse
+from hydrolib.bulletin17c import _b17b_skew_mse, _bias_correction_factors
 
 
 # Fixtures
@@ -573,6 +573,60 @@ class TestB17BSkewMse:
 
     def test_mse_falls_with_record_length(self):
         assert _b17b_skew_mse(100, 0.2) < _b17b_skew_mse(20, 0.2)
+
+
+class TestBiasCorrectionFactors:
+    """c2 and c3 in moms_p3, emafit.f:1407.
+
+    They come from ``n_e``, the exact-peak count, because the blockdata default
+    is ``data bcf/1997/`` (emafit.f:3898). The Griffis 2004 alternative, which
+    uses the total interval count, is the branch commented out one line below.
+    hydrolib used the total count until this was measured against the
+    ``moms_p3`` oracle; see tests/fortran_parity/test_fortran_oracles.py.
+    """
+
+    def test_matches_the_cohn_1997_formulas(self):
+        c2, c3 = _bias_correction_factors(84)
+        assert c2 == pytest.approx(84 / 83)
+        assert c3 == pytest.approx(84**2 / (83 * 82))
+
+    def test_takes_the_exact_peak_count_not_the_total(self):
+        """The whole point: on a censored record these must differ.
+
+        Cains Coulee is 32 intervals of which 11 are censored by MGBT, so the
+        factors are built from 21, not 32.
+        """
+        assert _bias_correction_factors(21) != _bias_correction_factors(32)
+        assert _bias_correction_factors(21)[0] == pytest.approx(21 / 20)
+
+    def test_agrees_with_the_total_count_when_nothing_is_censored(self):
+        """Which is why no uncensored parity case could ever detect the bug.
+
+        Powder River is 85 intervals with nothing censored, so ``n_e == n``
+        and the 1997 and 2004 conventions coincide exactly. Compared against
+        the 2004 formula written out longhand -- the branch this code used to
+        take -- to show they are the same number there and only there.
+        """
+        n = 85
+        griffis_2004 = (n / (n - 1.0), n**2 / ((n - 1.0) * (n - 2.0)))
+        assert _bias_correction_factors(n) == pytest.approx(griffis_2004)
+
+        # 32 intervals, 21 of them exact: now they part company.
+        assert _bias_correction_factors(21) != pytest.approx((32 / 31.0, 32**2 / (31.0 * 30.0)))
+
+    def test_correction_falls_towards_one_as_the_record_grows(self):
+        assert 1.0 < _bias_correction_factors(200)[0] < _bias_correction_factors(20)[0]
+
+    @pytest.mark.parametrize("n_exact", [0, 1, 2])
+    def test_too_few_exact_peaks_disables_the_correction(self, n_exact):
+        """moms_p3 has no guard here and would divide by zero.
+
+        c3's denominator is (n-1)(n-2), so two exact peaks is already fatal and
+        one is fatal for c2 as well. The Fortran's own "no bias correction"
+        branch returns 1.0 for both, which is what this falls back to -- a
+        record this thin has no small-sample correction worth making.
+        """
+        assert _bias_correction_factors(n_exact) == (1.0, 1.0)
 
 
 class TestMomUserLowOutlierThreshold:

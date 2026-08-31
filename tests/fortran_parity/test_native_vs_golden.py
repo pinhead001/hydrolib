@@ -51,7 +51,13 @@ class TestRung3Moments:
         assert abs(actual - expected) / abs(expected) * 100 < 1.5
 
     def test_at_site_skew(self, golden_big_sandy, native_big_sandy):
-        """Compared absolutely: both sit near zero, so a ratio is meaningless."""
+        """Compared absolutely: both sit near zero, so a ratio is meaningless.
+
+        The bound is 0.05 and the measured gap is 1.4e-4 -- 346x of headroom,
+        left deliberately loose because a near-zero skew is where the P3
+        gamma/Wilson-Hilferty blend is least stable. It was 4.6e-3 before the
+        moment bias-correction factors were fixed to the exact-peak count.
+        """
         expected = golden_big_sandy["outputs"]["cmoms"][2][1]
         actual = native_big_sandy._results.skew_station
         assert abs(actual - expected) < 0.05
@@ -60,9 +66,11 @@ class TestRung3Moments:
         strict=True,
         reason=(
             "peakfq 8.1.0 weights skew with the HWN 'optimized adjustment factor when "
-            "censored data are present' (fortranWrappers.R); hydrolib uses the standard "
-            "Bulletin 17C weighting. On this record that is -0.1563 vs -0.1009, ~35%. "
-            "See docs/FORTRAN_UPLOAD.md section 6.0b."
+            "censored data are present' (fortranWrappers.R): its at-site skew MSE carries "
+            "the ADJE censoring bias adjustment and its Wd comes from detrat, neither of "
+            "which hydrolib implements. On this record that is -0.1563 vs -0.1157, 26%. "
+            "The at-site skew above now matches to 1.4e-4, so this is the weighting alone. "
+            "See docs/VAR_MOM_PORT_PLAN.md phases 4-5 and FORTRAN_UPLOAD.md section 6.0b."
         ),
     )
     def test_weighted_skew(self, golden_big_sandy, native_big_sandy):
@@ -72,7 +80,23 @@ class TestRung3Moments:
 
 
 class TestRung5Quantiles:
-    """Same quantiles, given that the moments differ slightly?"""
+    """Same quantiles, given that the moments differ slightly?
+
+    Measured against the 3% bound, worst first: 2.82% at AEP 0.002, 2.11% at
+    0.005, 1.59% at 0.01, then under 1.1% everywhere else and 0.009% at 0.1.
+
+    The far tail has *tightened its margin* since the bias-correction fix --
+    Q100 was 0.88% and is now 1.59%. That is not a regression in the fit. The
+    at-site skew went from 4.6e-3 off to 1.4e-4 off, which is what this rung's
+    inputs are, but the quantiles are computed from the *weighted* skew, and
+    that is still missing ADJE and Wd (-0.1157 against -0.1563). A skew error
+    of that size shows up almost entirely at long return periods. Phases 4-5 of
+    docs/VAR_MOM_PORT_PLAN.md close it.
+
+    The bound stays at 3% rather than being widened to fit: 1.06x of headroom
+    at AEP 0.002 is uncomfortable, and it should be. If it trips before those
+    phases land, something else moved.
+    """
 
     @pytest.mark.parametrize("aep", [0.5, 0.2, 0.1, 0.04, 0.02, 0.01, 0.005, 0.002])
     def test_quantile(self, golden_big_sandy, native_big_sandy, aep):
