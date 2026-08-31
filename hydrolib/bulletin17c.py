@@ -558,8 +558,8 @@ class ExpectedMomentsAlgorithm(FloodFrequencyAnalysis):
         regional_skew: float = None,
         regional_skew_mse: float = None,
         ema_params: EMAParameters = None,
-        historical_peaks: List[Tuple[int, float]] = None,
-        perception_thresholds: Dict[Tuple[int, int], float] = None,
+        historical_peaks: Optional[List[Tuple[int, float]]] = None,
+        perception_thresholds: Optional[Dict[Tuple[int, int], float]] = None,
         user_low_outlier_threshold: Optional[float] = None,
     ):
         super().__init__(peak_flows, regional_skew, regional_skew_mse)
@@ -1461,8 +1461,8 @@ class Bulletin17C:
         water_years: np.ndarray = None,
         regional_skew: float = None,
         regional_skew_mse: float = None,
-        historical_peaks: List[Tuple[int, float]] = None,
-        perception_thresholds: Dict[Tuple[int, int], float] = None,
+        historical_peaks: Optional[List[Tuple[int, float]]] = None,
+        perception_thresholds: Optional[Dict[Tuple[int, int], float]] = None,
         ema_params: EMAParameters = None,
         user_low_outlier_threshold: Optional[float] = None,
     ):

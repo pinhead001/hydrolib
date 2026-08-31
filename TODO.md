@@ -2,7 +2,7 @@
 
 ## Status
 Last updated: 2026-08-31
-Tests: **463 passed, 1 deselected, 7 xfailed** in ~38 s (was ~75 s for far fewer tests; see
+Tests: **497 passed, 1 deselected, 7 xfailed** in ~62 s (was ~75 s for far fewer tests; see
 the MGBT memoization below). CI green on main. Two of the seven xfails are new, both on the
 Cains Coulee parity case; see P3.
 Fortran reference: **vendored** at `vendor/peakfqr/` (peakfq 8.1.0, CC0).
@@ -147,20 +147,20 @@ done — see the P3 table above and the Done section.)
       today would lose features. The dedupe is: move those two features into
       `hydrolib/freq_plot.py`, then delete the app copy. One peak-flow plotter, tested.
 
-- [ ] **`MethodOfMoments` ignores a user PILF threshold.** `Bulletin17C.run_analysis` does not
-      pass `user_low_outlier_threshold` down the MOM path (`bulletin17c.py:1494`), and MOM
-      does not censor low outliers at all — it computes a Grubbs-Beck value for reporting
-      only. So when EMA fails to converge and `app/ffa_runner.run_ffa` falls back to MOM, the
-      user's override is dropped. `_low_outlier_source()` reports that honestly rather than
-      claiming a threshold that had no effect, but the underlying limitation stands. Doing
-      this properly means censoring plus the conditional-probability adjustment, which is a
-      real piece of B17B, not a one-liner.
+- [ ] **`print()` in `hydrolib/__init__.py`.** `complete_analysis()` prints progress to stdout,
+      which `CLAUDE.md` forbids in library code. Six calls. Swapping them for
+      `logging.getLogger(__name__)` changes what a caller sees, so it is a small behavioural
+      change rather than a pure cleanup — hence listed, not done in passing.
 
-- [ ] **`FrequencyComparator` compares every parameter by percent difference.** That is the
-      wrong metric for skew, which legitimately crosses zero: Big Sandy's reference at-site
-      skew is 0.0066, so an absolute gap of 0.016 read as 249% and dominated `max_diff_pct`.
-      A denominator floor (`parameter_scale_floor`, default 0.1) stops it hiding the rest of
-      the report, but comparing skew in skew units with its own tolerance would be better.
+- [ ] **The mypy ratchet: six modules, 155 errors.** `__init__` (7), `bulletin17c` (62),
+      `freq_plot` (19), `hydrograph` (18), `lowflow` (19), `report` (30) are excluded in
+      `pyproject.toml`'s `[[tool.mypy.overrides]]`. The other fourteen modules are gated in
+      CI. Fix a module, delete its line; nothing may be added to the list.
+
+- [ ] **Three modules still at 0% coverage**: `cli.py`, `plots.py`,
+      `validation/reports.py`. `batch.py` was the fourth, and covering it immediately turned
+      up `analyze_sites()` broken for every input — so these are not merely untested, they
+      are unverified.
 
 - [ ] **`origin/dev` can be deleted.** The read-and-judge pass is done — see the commit
       "Port extra_curves from dev". `extra_curves` was the one library delta worth keeping
@@ -178,6 +178,49 @@ done — see the P3 table above and the Done section.)
 ---
 
 ## Done
+
+### Release, coverage and contributor infrastructure
+
+- [x] **mypy in CI**, gating fourteen of twenty modules with six on a documented ratchet.
+      Its first run found 172 errors, four of them real defects in shipped code: implicit
+      `Optional` on `Bulletin17C(historical_peaks=, perception_thresholds=)` and on both
+      dates of `USGSgage.download_daily_flow()`, and two `-> "pd.DataFrame"` annotations
+      naming a module that was never imported. `mypy` and `types-requests` went into the dev
+      extra so the job and `make typecheck` cannot resolve different versions.
+
+- [x] **`analyze_sites()` was broken for every input, and coverage is how it surfaced.**
+      `fetch_nwis_batch` returns plain dicts; `B17CEngine.fit` reads `record.flow`;
+      `run_multi_site`'s `except Exception` turned the `AttributeError` into
+      `{"error": "'dict' object has no attribute 'flow'"}` for every site, silently. Nothing
+      in `hydrolib/batch.py` was covered, so nothing executed it. Fixed by converting at the
+      boundary; `tests/test_batch.py` is the first test file the module has had, and pins
+      both the conversion and the fact that going through the fetch path does not change the
+      fitted numbers.
+
+- [x] **Coverage gate at 66%.** Measured 67.87%, up from 65% once `batch.py` went 0% → 100%
+      and `engine.py` 0% → 68%. Not the 80% `PRODUCTION.md` proposed: 80% fails on the first
+      run, and a floor above the floor is not a ratchet, it is a broken build. Verified in
+      both directions — the gate passes at 66 and fails non-zero at 70. Its own CI job rather
+      than the 3.9–3.12 matrix, because four interpreters give four slightly different
+      numbers and no authority about which is real.
+
+- [x] **`release.yml`**, tag-driven, with the two gates that matter running before anything
+      is published: the tag, `pyproject.toml` and `.bumpversion.cfg` must agree on the
+      version — exactly the drift that left `bump2version` unusable — and the built wheel
+      must contain `py.typed` and the packaged benchmark data, both of which have gone
+      missing before. PyPI publishing is opt-in behind a `PUBLISH_TO_PYPI` variable and
+      trusted publishing, so a tag push cannot publish by accident. **Unverified end to
+      end**: tag pushes return 403 here (see Blocked). Verified locally instead — the guard
+      accepts `v0.2.0` and rejects `v0.3.0`, `python -m build` produces both artifacts,
+      `twine check` passes, and the wheel assertion passes on the real wheel.
+
+- [x] **`CONTRIBUTING.md`, `.github/dependabot.yml`, `.pre-commit-config.yaml`.** The
+      pre-commit revs match the dev extra's pins, because installing different versions is
+      how CI lint went red in August 2026; mypy runs there as a `local` hook against the
+      developer's own environment rather than an isolated one that would disagree with CI.
+      `pre-commit run --all-files` has **not** been executed here — the hook repos need
+      network fetches the sandbox does not make — so the config parses but is otherwise
+      unproven.
 
 ### P1 — Reduce time to verify and commit
 

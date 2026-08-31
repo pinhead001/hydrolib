@@ -15,16 +15,21 @@ PKGS := hydrolib/ tests/ app/
 PYTEST := PYTHONSAFEPATH=1 $(PYTHON) -m pytest
 
 .DEFAULT_GOAL := help
-.PHONY: help check lint fmt test test-all smoke fortran parity golden clean
+.PHONY: help check lint typecheck fmt test test-all coverage smoke fortran parity golden clean
 
 help:  ## Show this help
 	@awk -F':.*?## ' '/^[a-z-]+:.*## /{printf "  %-10s %s\n", $$1, $$2}' Makefile
 
-check: lint test  ## Everything CI checks, in CI's order
+check: lint typecheck test  ## Everything CI checks, in CI's order
 
 lint:  ## Formatting check (does not modify files)
 	$(PYTHON) -m black --check --diff $(PKGS)
 	$(PYTHON) -m isort --check-only --diff $(PKGS)
+
+# The module exclusions are the ratchet in pyproject.toml's
+# [[tool.mypy.overrides]]. Fixing a module means deleting its line there.
+typecheck:  ## Type check hydrolib/ (config and exclusions in pyproject.toml)
+	$(PYTHON) -m mypy
 
 fmt:  ## Apply formatting
 	$(PYTHON) -m black $(PKGS)
@@ -35,6 +40,15 @@ test:  ## Run the suite as CI does
 
 test-all:  ## Run everything, including the network tests
 	$(PYTEST) tests/ -m ""
+
+# The floor is deliberately a little under the measured figure: it is there to
+# catch a module arriving with no tests, not to red-build a two-line change.
+# Raise it as coverage rises -- it is a ratchet.
+COV_MIN ?= 66
+
+coverage:  ## Run the suite with coverage and enforce the floor
+	$(PYTEST) tests/ --cov --cov-report=term-missing --cov-report=html \
+		--cov-fail-under=$(COV_MIN)
 
 # Importing app/streamlit_app.py executes the whole script in Streamlit's bare
 # mode, so this exercises the app end to end short of a button press. Needs

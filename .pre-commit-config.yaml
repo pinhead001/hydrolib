@@ -1,0 +1,52 @@
+# Optional, but it runs exactly what CI runs. Install with:
+#   pip install pre-commit && pre-commit install
+#
+# The black/isort/flake8 revs below MUST match the pins in pyproject.toml's dev
+# extra. They are duplicated because pre-commit resolves its own environments
+# rather than using the one you installed -- and an unpinned hook is precisely
+# how CI lint went red in August 2026, running black 26 against a tree formatted
+# by the black 24 that `pip install -e ".[dev]"` resolves. If you change a pin in
+# pyproject, change it here in the same commit.
+repos:
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        args: [--config=pyproject.toml]
+
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: [--settings-path=pyproject.toml]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+        # vendor/ is a verbatim reference copy of USGS peakfq 8.1.0. Editing
+        # anything under it silently invalidates every parity comparison made
+        # against it, whitespace included.
+        exclude: ^vendor/
+      - id: trailing-whitespace
+        exclude: ^vendor/
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=512]
+
+  # mypy runs from your own environment rather than mirrors-mypy, which
+  # resolves an isolated one. hydrolib's annotations are checked against the
+  # real numpy/pandas/scipy it is installed with; a hook environment carrying
+  # different stubs would report errors CI does not, and miss errors CI has.
+  # This is the same command as `make typecheck`.
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: python -m mypy
+        language: system
+        types: [python]
+        files: ^hydrolib/
+        pass_filenames: false

@@ -1,0 +1,37 @@
+# Dependency updates. Two ecosystems, because they fail differently:
+# pip drift breaks the build on a fresh install, action drift breaks it on a
+# fresh runner, and neither surfaces until something else is already red.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    groups:
+      # The four linters are pinned to major ranges in pyproject's dev extra and
+      # are upgraded deliberately, together -- a lone black bump reformats the
+      # tree and buries the rest of the PR.
+      dev-tooling:
+        patterns: ["black", "isort", "flake8", "mypy", "pytest*", "bump2version", "types-*"]
+    ignore:
+      # numpy/scipy/pandas floors are the compatibility contract with
+      # Python 3.9, which this package still supports. Raising them is a
+      # supported-versions decision, not a dependency update.
+      - dependency-name: numpy
+        update-types: [version-update:semver-major]
+      - dependency-name: scipy
+        update-types: [version-update:semver-major]
+      - dependency-name: pandas
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    groups:
+      actions:
+        patterns: ["*"]

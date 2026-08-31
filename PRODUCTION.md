@@ -1,6 +1,6 @@
 # HydroLib Production Readiness Status
 
-**Status**: ✅ **MVP Complete** | **Next Phase**: Medium-priority enhancements (2–3 weeks)
+**Status**: ✅ **Phase 1 and the Phase 2 tooling complete** | **Next Phase**: docs, license headers, integration tests
 
 Last updated: 2026-08-31
 
@@ -35,42 +35,74 @@ All critical governance and security measures are in place.
 
 These should be completed before widespread production adoption.
 
-### Type Checking & Linting
+### Type Checking & Linting — ✅ mypy and pre-commit done
 
-| Task | Priority | Effort | Impact |
+| Task | Priority | Effort | Status |
 |------|----------|--------|--------|
-| Add `mypy` to CI and enforce type hints | HIGH | 2–3 days | Catch type errors early; improves IDE support |
-| Add `pydocstyle` to CI for docstring coverage | MEDIUM | 1–2 days | Ensures all public APIs are documented |
-| ~~Add type hints to all function signatures~~ — already done (99%); see the corrected risk note below | — | — | — |
-| Create `.pre-commit-config.yaml` for local enforcement | MEDIUM | 1 day | Prevents formatting issues from reaching CI |
+| ~~Add `mypy` to CI and enforce type hints~~ | HIGH | est. 2–3 days; took ~1 hour | ✅ `typecheck` job, `make typecheck` |
+| ~~Create `.pre-commit-config.yaml` for local enforcement~~ | MEDIUM | est. 1 day | ✅ pinned to the dev extra's versions |
+| ~~Add type hints to all function signatures~~ — already done (99%) | — | — | ✅ |
+| Add `pydocstyle` to CI for docstring coverage | MEDIUM | 1–2 days | open |
 
-**Recommendation**: Start with `mypy` (highest ROI). Type hints prevent ~30% of production bugs.
+**What mypy found on its first run**, which is the answer to "highest ROI": 172 errors, of
+which four were real defects in shipped code — `historical_peaks`/`perception_thresholds` on
+`Bulletin17C` and both date arguments to `USGSgage.download_daily_flow()` declared
+non-optional with a `None` default, so a type checker rejected the documented call; and two
+`-> "pd.DataFrame"` annotations naming a module never imported, unresolvable by mypy, an IDE
+or `typing.get_type_hints()`.
+
+**Fourteen of twenty modules are gated.** The other six — `__init__`, `bulletin17c`,
+`freq_plot`, `hydrograph`, `lowflow`, `report` — hold 155 errors and are excluded in
+`pyproject.toml`'s `[[tool.mypy.overrides]]`. That list is a ratchet: fix a module, delete
+its line. Nothing may be added to it.
 
 ---
 
-### Release Process & PyPI Publishing
+### Release Process & PyPI Publishing — ✅ workflow done, publishing opt-in
 
-| Task | Priority | Effort | Impact |
+| Task | Priority | Effort | Status |
 |------|----------|--------|--------|
-| Create `.github/workflows/release.yml` | HIGH | 1 day | Automate PyPI publishing on git tags |
-| Add `PYPI_TOKEN` secret to GitHub repo settings | HIGH | 15 min | Required for automated releases |
-| Document version bump workflow (using `bump2version`) | MEDIUM | 2 hours | Repeatable release process |
-| Test release locally with test PyPI | MEDIUM | 1 hour | Validate workflow before first production release |
+| ~~Create `.github/workflows/release.yml`~~ | HIGH | 1 day | ✅ tag-driven |
+| ~~Document version bump workflow (using `bump2version`)~~ | MEDIUM | 2 hours | ✅ `CONTRIBUTING.md` |
+| ~~Add `PYPI_TOKEN` secret~~ — superseded | HIGH | — | ✅ n/a: trusted publishing, no long-lived token |
+| Enable PyPI publishing | HIGH | 30 min | open — needs the owner |
+| Test the workflow against TestPyPI | MEDIUM | 1 hour | open |
 
-**Impact**: Enables one-command releases. Currently no CI-based publishing.
+The workflow builds, tests, and publishes a GitHub release on a `v*` tag. Two gates run
+before anything is published: the tag, `pyproject.toml` and `.bumpversion.cfg` must agree on
+the version — the check that would have caught the 0.0.3-vs-0.2.0 drift above — and the built
+wheel must actually contain `py.typed` and the packaged benchmark data, both of which have
+gone missing before.
+
+PyPI publishing is deliberately **off** until someone sets the `PUBLISH_TO_PYPI` repository
+variable to `true` and registers hydrolib as a trusted publisher, so a tag push cannot
+publish by accident. Trusted publishing is why there is no `PYPI_TOKEN`: OIDC issues a
+short-lived credential per run, leaving no long-lived secret to leak.
+
+**Not verified end to end.** Tag pushes return HTTP 403 from the agent environment, so the
+workflow has never run. What *was* verified locally, with the pinned toolchain: the version
+guard accepts `v0.2.0` and rejects `v0.3.0`; `python -m build` produces both artifacts;
+`twine check` passes on each; and the wheel-contents assertion passes on the real wheel.
 
 ---
 
-### Test Coverage Reporting
+### Test Coverage Reporting — ✅ done, floor at 66%
 
-| Task | Priority | Effort | Impact |
+| Task | Priority | Effort | Status |
 |------|----------|--------|--------|
-| Add `pytest-cov` to CI job (already in dev extras) | HIGH | 30 min | Generate coverage reports |
-| Set coverage threshold (e.g., 80%) in CI | MEDIUM | 30 min | Prevent coverage regressions |
-| Add badge to README.md | LOW | 15 min | Visual indicator of test health |
-| Integrate with codecov.io (optional) | LOW | 1 hour | Track coverage trends over time |
+| ~~Add `pytest-cov` to a CI job~~ | HIGH | 30 min | ✅ `coverage` job, HTML uploaded as an artifact |
+| ~~Set a coverage threshold in CI~~ | MEDIUM | 30 min | ✅ 66% floor, `make coverage` |
+| Add a badge to README.md | LOW | 15 min | open |
+| Integrate with codecov.io (optional) | LOW | 1 hour | open |
 
-**Recommendation**: Add threshold enforcement (fails if coverage drops below 80%).
+**The threshold is 66%, not the 80% this document proposed.** Measured coverage is 67.87%;
+80% would have failed CI on the first run. A floor has to be under the floor. Raise it as
+coverage rises — `COV_MIN` in the Makefile — and verify it in both directions: at 66 the
+gate passes, at 70 it fails with a non-zero exit.
+
+Coverage went 65% → 68% in the course of adding the gate, because measuring it turned up
+`hydrolib.batch` at 0% and `analyze_sites()` broken for every input (see Fixed in the
+changelog). Still at 0%: `cli.py`, `plots.py`, `validation/reports.py`.
 
 ---
 
@@ -79,18 +111,29 @@ These should be completed before widespread production adoption.
 | Task | Priority | Effort | Impact |
 |------|----------|--------|--------|
 | Add MIT license headers to all `.py` files | MEDIUM | 2 hours | Legal clarity; industry standard |
-| Add `docs/CONTRIBUTING.md` with development workflow | MEDIUM | 2 hours | Onboards new contributors |
+| ~~Add `CONTRIBUTING.md` with development workflow~~ | MEDIUM | 2 hours | ✅ at the repo root, where GitHub links it |
 | Expand API documentation with examples per module | MEDIUM | 4–6 hours | Better discoverability |
 | Add deployment guide for Streamlit Cloud | LOW | 2 hours | Users can self-host easily |
 
 ---
 
-### Pre-Commit Hooks (Optional but Recommended)
+### Pre-Commit Hooks — ✅ config added
 
-| Task | Priority | Effort | Impact |
+| Task | Priority | Effort | Status |
 |------|----------|--------|--------|
-| Create `.pre-commit-config.yaml` | LOW | 1 day | Catch issues locally before push |
-| Document `pre-commit install` in README | LOW | 30 min | Improves developer experience |
+| ~~Create `.pre-commit-config.yaml`~~ | LOW | 1 day | ✅ black/isort/mypy + file hygiene |
+| ~~Document `pre-commit install`~~ | LOW | 30 min | ✅ `CONTRIBUTING.md` |
+
+The black and isort revs must match the pins in the dev extra; the config says so, because
+installing different versions is precisely how CI lint went red in August 2026. mypy runs as
+a `local` hook against your own environment rather than through `mirrors-mypy`, which would
+resolve an isolated one and disagree with CI. `vendor/` is excluded from the whitespace
+hooks — it is a verbatim reference copy, and a stray newline there silently invalidates every
+parity comparison.
+
+**Not verified**: `pre-commit run --all-files` has not been executed here (the hook repos
+need network fetches from the sandbox). The YAML parses and the local mypy hook runs the same
+command as `make typecheck`, which is verified.
 
 ---
 
@@ -101,7 +144,7 @@ Advanced safety measures for high-stakes deployments.
 | Task | Priority | Effort | Impact |
 |------|----------|--------|--------|
 | **Automated security scanning** | MEDIUM | 2 days | Detect known vulnerabilities in dependencies |
-| Add `dependabot` config (`.github/dependabot.yml`) | MEDIUM | 2 hours | Auto-update dependencies weekly |
+| ~~Add `dependabot` config (`.github/dependabot.yml`)~~ | MEDIUM | 2 hours | ✅ pip + actions, monthly, linters grouped |
 | Add SBOM (Software Bill of Materials) generation | LOW | 1 day | Supply chain transparency |
 | Add integration tests (NWIS API calls in staging) | HIGH | 5–7 days | Catch breaking API changes early |
 | Performance benchmarking CI job | LOW | 3–4 days | Detect regressions in computation time |
@@ -127,7 +170,7 @@ Advanced safety measures for high-stakes deployments.
      one-file fix, now made.
    - What remains is *enforcement*: nothing checks the annotations are correct
      or that new code keeps them.
-   - **Mitigation**: add mypy to CI (Phase 2). Much cheaper than the 3–5 days
+   - **Mitigation**: ✅ mypy is in CI. Much cheaper than the 3–5 days
      estimated below, because the annotations already exist.
    - **Timeline**: hours, not days
 
@@ -163,10 +206,10 @@ Advanced safety measures for high-stakes deployments.
 - Brief team on new PR review requirements
 
 ### **Week 1–2 (Medium-priority)**
-- Add `mypy` type checking
-- Add test coverage enforcement
-- Set up PyPI release workflow
-- Test release process with test PyPI
+- ~~Add `mypy` type checking~~ ✅
+- ~~Add test coverage enforcement~~ ✅
+- ~~Set up the release workflow~~ ✅ (publishing to PyPI still needs enabling)
+- Test the release process against TestPyPI
 
 ### **Week 3 (Nice-to-have)**
 - Add Dependabot for dependency updates

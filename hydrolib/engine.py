@@ -6,9 +6,12 @@ Provides a simplified interface for Bulletin 17C analysis with PeakFQ-style outp
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
+
+if TYPE_CHECKING:  # pragma: no cover - import for annotations only
+    import pandas as pd
 
 from .core import PeakRecord, compute_ci_lp3, lp3_frequency_factor_peakfq, lp3_quantile_peakfq
 

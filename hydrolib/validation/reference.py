@@ -240,7 +240,7 @@ class ReferenceResult:
                 "(needs gfortran and meson), or use ReferenceResult.from_golden()"
             ) from exc
 
-        aeps = np.asarray(aeps, dtype=float)
+        aeps_arr = np.asarray(aeps, dtype=float)
         out = emafitpr(
             np.asarray(ql, dtype=float),
             np.asarray(qu, dtype=float),
@@ -254,7 +254,7 @@ class ReferenceResult:
             regional_skew,
             regional_skew_mse,
             gbthrsh0,
-            1.0 - aeps,  # emafitpr takes non-exceedance probabilities
+            1.0 - aeps_arr,  # emafitpr takes non-exceedance probabilities
             eps,
             weight_opt,
         )

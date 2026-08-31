@@ -407,7 +407,9 @@ class USGSgage:
             else:
                 self._last_api_error = str(e)
 
-    def download_daily_flow(self, start_date: str = None, end_date: str = None) -> pd.DataFrame:
+    def download_daily_flow(
+        self, start_date: Optional[str] = None, end_date: Optional[str] = None
+    ) -> pd.DataFrame:
         """Download mean daily streamflow data from USGS."""
         params = {
             "format": "rdb",
@@ -966,9 +968,9 @@ def fetch_nwis_peaks(site_no: str) -> List[Dict]:
         Peak flow records for the site
     """
     gage = USGSgage(site_no)
-    gage.download_peak_flow()
+    peaks = gage.download_peak_flow()
     records = []
-    for _, row in gage.peak_data.iterrows():
+    for _, row in peaks.iterrows():
         records.append(
             {
                 "year": int(row["water_year"]),

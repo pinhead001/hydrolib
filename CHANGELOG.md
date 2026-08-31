@@ -8,10 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `CONTRIBUTING.md`, covering setup, the `make` targets CI runs, the numerical-change
+  rules, and the release procedure
+- mypy in CI (`make typecheck`) over `hydrolib/`, with fourteen of twenty modules gated
+  and six on a documented ratchet in `pyproject.toml`
+- Coverage reporting in CI with a 66% floor (`make coverage`), against 68% measured; the
+  HTML report is uploaded as a build artifact
+- `.github/workflows/release.yml` — tag-driven, refusing to release unless the tag,
+  `pyproject.toml` and `.bumpversion.cfg` agree on the version, and asserting the built
+  wheel contains `py.typed` and the packaged benchmark data. PyPI publishing is opt-in
+  behind a `PUBLISH_TO_PYPI` repository variable and trusted publishing.
+- `.github/dependabot.yml` for pip and GitHub Actions updates
+- `.pre-commit-config.yaml` pinned to the same tool versions as the dev extra
+- `tests/test_batch.py` — first tests for `hydrolib.batch`, which had none
 
 ### Changed
+- `mypy` and `types-requests` added to the dev extra, so the checker cannot drift from CI
 
 ### Fixed
+- `analyze_sites()` returned `{"error": "'dict' object has no attribute 'flow'"}` for
+  every site. `fetch_nwis_batch` yields plain dicts, `B17CEngine.fit` reads `record.flow`,
+  and `run_multi_site`'s `except Exception` swallowed the `AttributeError`. The records are
+  now converted at the boundary.
+- `Bulletin17C(historical_peaks=..., perception_thresholds=...)` and
+  `USGSgage.download_daily_flow(start_date=..., end_date=...)` declared non-optional types
+  with a `None` default, so a type checker rejected the documented calls
+- `B17CEngine.frequency_table()` and `batch_summary_table()` annotated a return type of
+  `"pd.DataFrame"` without importing `pandas` at module level, so the annotations could not
+  be resolved by mypy, an IDE, or `typing.get_type_hints()`
 
 ### Removed
 

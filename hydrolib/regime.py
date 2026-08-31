@@ -543,6 +543,8 @@ def separate_baseflow(
         baseflow = _ih_smoothed_minima(flows, block_days=block_days, factor=factor)
     elif method == "lyne_hollick":
         baseflow = _lyne_hollick(flows, alpha=alpha, passes=passes)
+    elif drainage_area_sqmi is None:  # pragma: no cover - rejected by the guard above
+        raise ValueError(f"method={method!r} requires drainage_area_sqmi")
     else:
         n_star = _hysep_interval_days(drainage_area_sqmi)
         if method == "hysep_fixed":

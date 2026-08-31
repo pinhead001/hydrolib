@@ -4,11 +4,14 @@ hydrolib.batch - Multi-site batch processing for flood frequency analysis
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
 from .core import PeakRecord
 from .engine import STANDARD_RETURN_PERIODS, B17CEngine
 from .usgs import fetch_nwis_batch
+
+if TYPE_CHECKING:  # pragma: no cover - import for annotations only
+    import pandas as pd
 
 
 def run_multi_site(
@@ -34,7 +37,7 @@ def run_multi_site(
         - quantiles: dict of return period to flow
         - ci: dict of return period to confidence interval dict
     """
-    results = {}
+    results: Dict[str, Dict[str, Any]] = {}
 
     for site, records in data.items():
         try:
@@ -79,8 +82,25 @@ def analyze_sites(
     # Fetch data in parallel
     data, fetch_errors = fetch_nwis_batch(site_nos, workers=workers)
 
+    # fetch_nwis_batch yields plain dicts, not PeakRecords, and B17CEngine.fit
+    # reads `r.flow` off each record. Passing the dicts straight through raised
+    # AttributeError for every site, which run_multi_site's `except Exception`
+    # turned into {"error": ...} -- so analyze_sites always returned an error
+    # for every site and never said why. Convert at the boundary.
+    records = {
+        site: [
+            PeakRecord(
+                year=int(row["year"]),
+                flow=None if row.get("flow") is None else float(row["flow"]),
+                source=row.get("source"),
+            )
+            for row in rows
+        ]
+        for site, rows in data.items()
+    }
+
     # Run analysis on fetched data
-    analysis_results = run_multi_site(data, return_periods)
+    analysis_results = run_multi_site(records, return_periods)
 
     return analysis_results, fetch_errors
 

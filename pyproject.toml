@@ -40,6 +40,11 @@ dev = [
     "isort>=5.12,<6",
     "flake8>=6.0,<7",
     "bump2version>=1.0.0,<2",
+    "mypy>=1.8,<2",
+    # hydrolib.usgs imports requests, which ships no inline annotations. Without
+    # the stubs mypy reports the import itself as an error and usgs.py can never
+    # be clean, so this is part of the checker, not an optional extra.
+    "types-requests",
 ]
 
 [project.scripts]
@@ -58,6 +63,50 @@ include = ["hydrolib*", "data*"]
 # them out of tests/, which is not packaged, so the command failed for every
 # installed user.
 "hydrolib.validation" = ["data/*.json"]
+
+# Enforcement for the annotations the codebase already carries (210 of 213
+# functions). py.typed publishes them; this is what stops them rotting.
+#
+# The module list below is a RATCHET, not a permanent exemption. Six modules
+# carry 155 errors between them and are excluded so the job can gate the other
+# fourteen today rather than gate nothing indefinitely. Fix a module, delete its
+# line. Never add a line to buy silence on new code -- a module that is off this
+# list must stay off it.
+[tool.mypy]
+files = ["hydrolib"]
+# Third-party scientific packages ship uneven annotations; this is about our
+# code, not theirs.
+ignore_missing_imports = true
+warn_unused_configs = true
+warn_redundant_casts = true
+# `x: str = None` is an error, not an implicit Optional. It had silently
+# mis-declared four public parameters across usgs.py and bulletin17c.py.
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = [
+    "hydrolib",
+    "hydrolib.bulletin17c",
+    "hydrolib.freq_plot",
+    "hydrolib.hydrograph",
+    "hydrolib.lowflow",
+    "hydrolib.report",
+]
+ignore_errors = true
+
+[tool.coverage.run]
+source = ["hydrolib"]
+# The f2py bridge is a generated extension wrapper; there is no Python in it to
+# cover, and it is absent unless the Fortran toolchain built it.
+omit = ["hydrolib/peakfqr/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
 
 [tool.black]
 line-length = 100

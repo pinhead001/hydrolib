@@ -56,6 +56,64 @@ jobs:
       - name: Test
         run: pytest tests/
 
+  # Annotations without a checker rot silently: `x: str = None` had
+  # mis-declared four public parameters, and two "pd.DataFrame" return
+  # annotations named a module that was never imported. py.typed publishes
+  # these annotations to downstream type checkers, so they have to be true.
+  #
+  # Six modules are excluded via [[tool.mypy.overrides]] in pyproject.toml --
+  # a ratchet with 155 remaining errors, not a permanent exemption. The other
+  # fourteen are gated here.
+  typecheck:
+    name: mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # The pins, like every other job. mypy and types-requests are in the dev
+      # extra precisely so this job and a developer's `make typecheck` cannot
+      # resolve different versions and disagree.
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Type check
+        run: make typecheck
+
+  # A floor, not a target. It exists because hydrolib.batch sat at 0% coverage
+  # and shipped an analyze_sites that raised AttributeError for every site,
+  # swallowed into {"error": ...} by a bare except -- nothing executed it, so
+  # nothing said so.
+  #
+  # Separate from the test matrix on purpose: coverage is one number, and
+  # measuring it four times over four interpreters produces four slightly
+  # different ones and no authority about which is the real one. This job
+  # installs the app requirements too, so the measurement covers everything the
+  # suite can reach.
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install
+        run: pip install -e ".[dev]" -r app/requirements.txt
+
+      - name: Test with coverage
+        run: make coverage
+
+      - name: Upload the HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: htmlcov/
+          retention-days: 14
+
   # app/ had no tests and was not linted, so a Streamlit change could not be
   # reviewed with any confidence -- and that is why dev's app work was left
   # unported. Lint now covers app/ through PKGS in the Makefile; this job adds
