@@ -25,6 +25,14 @@ They are **not two problems**. Both bottom out in `var_mom` and its dependency t
 the one piece of the reference implementation that has never been ported. Read this section
 as one item with two symptoms.
 
+**A phased plan for all of it is in `docs/VAR_MOM_PORT_PLAN.md`**, with a per-routine oracle
+and an acceptance test for each phase. Two things it establishes that change the work here:
+the censored-path moment defect is a bias-correction factor rather than the truncated-moment
+code (see the first item below), and `_emafort.pyf` can expose an oracle for *every* routine
+in the tree — f2py wraps plain Fortran `function`s, which `.Fortran()` cannot, so the
+current four-routine selection is not a limit. Both were verified against the built
+extension, not assumed.
+
 **The defect is censoring-specific, and that is now measured rather than assumed.** Two
 Wyoming/Montana parity cases were added for exactly this question:
 
@@ -37,6 +45,30 @@ So with nothing censored the native EMA reproduces peakfq to machine precision �
 regional-skew weighting is *right*, not merely closer. Everything that remains is
 censored-path work. Cains Coulee is also the first case in the repository where `detrat`
 actually bites, so it is the oracle for that routine.
+
+- [ ] **Fix the moment bias-correction factor first — it is not part of the port.**
+      `moms_p3` reads `bcf` from `common /tac002/`, and the blockdata default is
+      `data bcf/1997/` (`emafit.f:3898`), which builds `c2`/`c3` from `n_bcf = n_e`, the
+      count of **exactly observed** peaks (`emafit.f:1407`). `_ema_iteration` uses the total
+      interval count — the `bcf = 2004` branch, commented out one line below the default.
+      With nothing censored the two are identical, which is why Powder River is exact and
+      why no existing test separates them.
+
+      Prototyped (monkey-patched `_ema_iteration`, nothing else changed):
+
+      | case | quantity | current | `n_bcf = n_e` | peakfq 8.1.0 |
+      |---|---|---:|---:|---:|
+      | Cains Coulee | at-site skew | −0.82996 | **−0.70791** | −0.70789 |
+      | Big Sandy | at-site skew | +0.00196 | **+0.00675** | +0.00660 |
+      | Big Sandy | `std_log` | 0.634% | **0.218%** | 0.291043 |
+      | Powder River | every moment | exact | exact | — |
+
+      One line, and it retires the `skew_at_site` half of the Cains Coulee
+      `xfail(strict=True)`. It must land **before** the port: `mseg_all`, `detrat`,
+      `var_mom` and `regmoms` are all evaluated at the at-site moments, so porting them
+      against an at-site skew that is 0.12 wrong means calibrating against a poisoned input.
+      Expect the weighted skew and Q100 to move slightly the wrong way until Phases 4-5 of
+      the plan land — that is the missing ADJE and `Wd`, not a regression.
 
 - [ ] **Port `var_mom` and the routines it needs.** ~1,100 lines of Fortran in `emafit.f`
       alone, plus `CHOL33` (`probfun.f`), `DLGINV` (`imslfake.f`), and `expmomderiv`, `m2mn`,
@@ -78,9 +110,10 @@ actually bites, so it is the oracle for that routine.
 
       * `_ema_iteration` reproduces `moms_p3` **exactly** on uncensored rows (0.0 on the
         mean, ~1e-14 variance, ~1e-12 skew) and diverges only where intervals are censored
-        (Cains Coulee: 0.70% variance, 4.94% skew). So the transcribed formulas are right
-        and the residual is in the truncated-P3 moment code for censored intervals — that is
-        what the port has to replace, and it is a smaller target than "the EMA is off".
+        (Cains Coulee: 0.70% variance, 4.94% skew). The conclusion originally drawn from
+        that — that the residual is in the truncated-P3 moment code — has since been
+        measured and is **wrong**. It is the bias-correction factor; see the Phase 0 item
+        above. hydrolib's truncated moments agree with `mP3` to ~1e-12.
       * `_b17b_skew_mse` is exact against `mseg()` up to n = 150 and **31% high at n = 200**
         (0.0479 against 0.0365). `mseg_all` evaluates `mseg()` at `min(n, 150)` then lets
         ADJE's bias adjustment partially undo the cap; hydrolib applies the cap alone. On a
