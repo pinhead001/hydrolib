@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.ffa_runner import _low_outlier_source, format_parameters_df, format_quantile_df, run_ffa
 from tests.fixtures.big_sandy import REGIONAL_SKEW, REGIONAL_SKEW_SD, SYSTEMATIC_PEAKS
+from tests.fixtures.paths import SKIP_REASON, TESTDATA_AVAILABLE
 
 
 def _big_sandy_arrays():
@@ -56,6 +57,7 @@ class TestFormatParametersDf:
         }
         df = format_parameters_df(params)
         expected_cols = [
+            "n",
             "Mean (log10)",
             "Std Dev (log10)",
             "Station Skew",
@@ -72,6 +74,45 @@ class TestFormatParametersDf:
         df = format_parameters_df({"mean_log": 3.7})
         assert df["PILF Threshold (cfs)"].iloc[0] == "none"
         assert df["PILFs"].iloc[0] == "0"
+
+    def test_record_length_reads_as_n_equals(self):
+        assert format_parameters_df({"n_peaks": 117})["n"].iloc[0] == "n = 117"
+        assert format_parameters_df({"n_peaks": 1200})["n"].iloc[0] == "n = 1,200"
+
+    # The marker alone does not skip anything -- it only labels -- so it is
+    # paired with a skipif, the same way tests/fortran_parity/test_wymt_vs_golden.py
+    # does it. Without the skipif this errors rather than skips when the
+    # reference tree is absent.
+    @pytest.mark.requires_peakfqr_testdata
+    @pytest.mark.skipif(not TESTDATA_AVAILABLE, reason=SKIP_REASON)
+    def test_record_length_is_the_peak_count_not_the_uncensored_count(self):
+        """n must not shrink as MGBT censors PILFs.
+
+        ``n_systematic`` is "systematic and not censored" (bulletin17c.py:1331),
+        so it falls by one per PILF. Reporting that as the record length would
+        double-report the PILF column beside it and make the record look like it
+        changes length when the threshold moves. ``n_peaks`` is every row the fit
+        used and holds still.
+        """
+        from hydrolib.bulletin17c import Bulletin17C
+        from tests.fixtures.wymt_peaks import load_site
+
+        site = load_site("06327450.00")  # Cains Coulee: MGBT censors 11 of 32
+        years = sorted(site.peaks)
+        b17c = Bulletin17C(
+            peak_flows=[site.peaks[y] for y in years],
+            water_years=years,
+            regional_skew=site.regional_skew,
+            regional_skew_mse=site.regional_skew_mse,
+        )
+        r = b17c.run_analysis(method="ema")
+        assert r.n_low_outliers == 11
+        assert r.n_systematic == len(years) - 11, "n_systematic nets out the PILFs"
+        assert format_parameters_df({"n_peaks": r.n_peaks})["n"].iloc[0] == f"n = {len(years)}"
+
+    def test_missing_record_length_renders_as_zero(self):
+        """An older cached result dict has no n_peaks; the table must not blow up."""
+        assert format_parameters_df({"mean_log": 3.7})["n"].iloc[0] == "n = 0"
 
     def test_pilf_threshold_names_its_source(self):
         """A user needs to know whether the cut is MGBT's or their own."""

@@ -102,12 +102,23 @@ plot_end = None
 peak_start_year = None
 peak_end_year = None
 
-# Create placeholder for date range controls (will be populated after data loads)
+# Placeholders for the date range controls, populated after data loads.
+#
+# Two of them, not one, and the divider and heading between these two lines are
+# the whole reason. A Streamlit container reserves its position in the sidebar
+# where it is *declared*, not where it is filled, so anything written into
+# date_range_container renders above the divider and anything written into
+# peak_years_container renders below the heading. The peak-year selector is a
+# flood-frequency control -- it re-runs the fit -- so it belongs under that
+# heading; the daily-flow range, which only filters hydrographs, does not.
 date_range_container = st.sidebar.container()
 
 # Flood Frequency Analysis section
 st.sidebar.markdown("---")
 st.sidebar.subheader("Flood Frequency Analysis")
+
+peak_years_container = st.sidebar.container()
+
 enable_ffa = st.sidebar.checkbox("Enable Flood Frequency Analysis", value=False)
 if enable_ffa:
     regional_skew = st.sidebar.number_input(
@@ -124,6 +135,18 @@ if enable_ffa:
         format="%.2f",
         help="Standard error of the regional skew estimate. Nationwide default: 0.55",
     )
+
+    # Which skews to fit, directly under the two inputs that drive them.
+    st.sidebar.markdown("**Skew Options**")
+    skew_station_on = st.sidebar.checkbox("Station Skew", value=False)
+    skew_weighted_on = st.sidebar.checkbox("Weighted Skew", value=True)
+    skew_regional_on = st.sidebar.checkbox("Regional Skew", value=False)
+
+    # "FFA" is load-bearing: st.sidebar.header("Plot Options") already governs
+    # the hydrograph and flow-duration plots further up. Two controls sharing a
+    # name in one sidebar is worse than either name on its own, divider or no
+    # divider.
+    st.sidebar.markdown("**FFA Plot Options**")
     show_freq_curve = st.sidebar.checkbox("Frequency Curve", value=True)
     if show_freq_curve:
         label_max_on_freq = st.sidebar.checkbox("Label Max Flow on Curve", value=False)
@@ -142,10 +165,6 @@ if enable_ffa:
     else:
         show_quantile_lines = []
         show_max_ri = False
-    st.sidebar.markdown("**Skew Options**")
-    skew_station_on = st.sidebar.checkbox("Station Skew", value=False)
-    skew_weighted_on = st.sidebar.checkbox("Weighted Skew", value=True)
-    skew_regional_on = st.sidebar.checkbox("Regional Skew", value=False)
     st.sidebar.markdown("**Low Outliers (PILFs)**")
     pilf_override = st.sidebar.number_input(
         "PILF Threshold Override (cfs)",
@@ -523,6 +542,9 @@ if st.session_state.gage_data:
             key="plot_end",
         )
 
+    # Everything below renders under the "Flood Frequency Analysis" heading;
+    # see where the two containers are declared.
+    with peak_years_container:
         # Peak flow year range (if FFA enabled and peak data exists)
         if enable_ffa and st.session_state.peak_data:
             st.markdown("**Peak Flow Years (for FFA)**")

@@ -2,10 +2,10 @@
 
 ## Status
 Last updated: 2026-08-31
-Tests: **473 passed, 1 deselected, 6 xfailed** in ~38 s with the Fortran extension built (was
-~75 s for far fewer tests; see the MGBT memoization below). CI green on main. One xfail was
-retired by the bias-correction fix; the six that remain are all the skew-weighting and
-CI-shape defects in P3.
+Tests: **494 passed, 1 deselected, 6 xfailed** in ~23 s with the Fortran extension and
+Streamlit both installed (was ~75 s for far fewer tests; see the MGBT memoization below).
+CI green on main. One xfail was retired by the bias-correction fix; the six that remain are
+all the skew-weighting and CI-shape defects in P3.
 Fortran reference: **vendored** at `vendor/peakfqr/` (peakfq 8.1.0, CC0).
 Fortran bridge: builds from those sources via `python build_fortran/build.py`
 (gfortran + meson) and is now **built and checked in CI** by `make parity`.
@@ -187,61 +187,6 @@ done — see the P3 table above and the Done section.)
       recorded here so the branch is recoverable by SHA. Left undeleted deliberately: that is
       not reversible from a commit, so it is the owner's call.
 
-### Streamlit app — requested UI changes
-
-Four items requested against `app/streamlit_app.py`. Items 3 and 4 are one edit to the same
-sidebar block and should land together; 1 and 2 are independent of them and of each other.
-
-- [ ] **Report the peak count in the LP3 parameters table.** `format_parameters_df`
-      (`app/ffa_runner.py:192`) builds the single-row table rendered under the graphs at
-      `app/streamlit_app.py:806`, and it has no record length. Neither does the `parameters`
-      dict it reads (`ffa_runner.py:160`), so this is two changes: carry the count out of
-      `FrequencyResults`, then add the column.
-
-      **Decide which count**, because three are available and they differ on exactly the
-      records this matters for. `r.n_peaks` is every interval the EMA fitted, including
-      censored years and historical rows; `r.n_systematic` is the gaged record; and PILFs are
-      already a separate column, so a count that silently nets them out would double-report.
-      Big Sandy is the case to check against: 84 intervals, 44 systematic peaks, 3 historical.
-      Suggest "Peaks (n)" = `n_systematic`, with historical shown beside it when non-zero, but
-      that is a call for whoever knows what the table is read for.
-
-      `tests/test_ffa_runner.py:49` pins the column set, so it needs the new name.
-
-- [ ] **Let the user move the legend on the flood frequency curve.** The position is
-      hardcoded in three places: `hydrolib/freq_plot.py:335` (`lower left`, the frequency
-      curve), `freq_plot.py:536` (`upper right`, `plot_peak_flows_with_thresholds`) and
-      `app/streamlit_app.py:306` (`upper left`, the app's own `plot_peak_timeseries`). On a
-      record whose fitted curve runs into the corner the box sits in, it covers the data.
-
-      Add a `legend_loc` parameter defaulting to today's value at each call site, then a
-      sidebar `selectbox` over matplotlib's location strings. Worth doing *after* the plotter
-      dedupe in the follow-ups above, or it lands twice in code that is meant to become one
-      function.
-
-- [ ] **Move the skew-option checkboxes up under the regional skew inputs.** They sit at
-      `app/streamlit_app.py:145-148`, below the plot toggles, which separates the three skew
-      choices from the two skew inputs that drive them. Move the `**Skew Options**` label and
-      its `Station` / `Weighted` / `Regional` checkboxes to immediately after the
-      `Regional Skew SE` `number_input` (`streamlit_app.py:120-126`).
-
-      Read the widget order, not just the line numbers: the plot toggles that follow are
-      nested in `if show_freq_curve:` / `if show_peak_timeseries:` blocks whose `else`
-      branches assign fallbacks, so the block has to move as a unit and the fallbacks stay
-      where they are.
-
-- [ ] **Add a `Plot Options` label below the skew options.** After the move above, so the
-      sidebar reads: Regional Skew → Regional Skew SE → **Skew Options** → **Plot Options** →
-      Frequency Curve → Peak Flow Time Series → **Low Outliers (PILFs)**.
-
-      **Name collision to resolve first.** `st.sidebar.header("Plot Options")` already exists
-      at `streamlit_app.py:72` for the hydrograph and flow-duration plots. Two controls with
-      the same name in one sidebar is worse than either name alone, even though a divider and
-      the `Flood Frequency Analysis` subheader sit between them. `**FFA Plot Options**` reads
-      unambiguously and matches the surrounding bold-markdown labels rather than the
-      top-level header style; confirm before implementing, since the request said
-      "Plot Options".
-
 ### Blocked
 
 - [ ] **Tag pushes return HTTP 403** from the agent environment, so neither `v0.2.0` nor an
@@ -325,6 +270,43 @@ sidebar block and should land together; 1 and 2 are independent of them and of e
 - [x] **`Benchmark.run_native()` dropped the perception thresholds**, comparing a
       systematic-only fit against the reference's censored one and calling the modelling
       difference an error.
+
+### Streamlit app — requested UI changes
+
+- [x] **`n` in the LP3 parameters table.** First column, rendered `n = 117` to match the
+      annotation the frequency curve already carries (`bulletin17c.py:491`). The count is
+      `n_peaks`, carried out through `run_ffa`'s `parameters` dict — **not** `n_systematic`,
+      which is computed as "systematic and not censored" (`bulletin17c.py:1331`) and so falls
+      by one for every PILF MGBT finds. Reporting that as record length would double-report
+      the PILF column beside it and make the record appear to change length when the
+      threshold moves. Pinned by a test on Cains Coulee, where the two differ by 11.
+
+      The raw dict also feeds `app/ffa_export.py`, so `n_peaks` now appears in the exported
+      `lp3_parameters.csv` as well.
+
+- [x] **`FFA Plot Options` label**, below the skew options. Named with the `FFA` prefix
+      deliberately: `st.sidebar.header("Plot Options")` at `streamlit_app.py:72` already
+      governs the hydrograph and flow-duration plots, and two controls sharing a name in one
+      sidebar is worse than either name alone, divider or no divider.
+
+- [x] **Skew-option checkboxes moved up** to sit directly under `Regional Skew SE`, so the
+      three skew choices follow the two inputs that drive them.
+
+- [x] **`Flood Frequency Analysis` heading and its divider moved above the
+      `Peak Flow Years (for FFA)` selector**, which is an FFA control — it re-runs the fit —
+      and now reads as one. This needed a second `st.sidebar.container()`, because a
+      container reserves its sidebar position where it is *declared*, not where it is filled:
+      the daily-flow range writes into the container declared above the divider and the
+      peak-year selector into the one declared below the heading. `Update Plots` moved with
+      the peak-year block, so it still sits below every input it applies to.
+
+      Sidebar order is now: Date Range Filters → Daily Flow Range → *divider* →
+      **Flood Frequency Analysis** → Peak Flow Years (for FFA) → Update Plots → Enable FFA →
+      Regional Skew → Regional Skew SE → **Skew Options** → **FFA Plot Options** →
+      **Low Outliers (PILFs)**.
+
+      Verified by `make smoke`, which imports `app/streamlit_app.py` and so executes the
+      whole sidebar body in Streamlit's bare mode.
 
 ### The moment bias-correction factor
 

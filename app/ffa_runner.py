@@ -158,6 +158,15 @@ def run_ffa(
                 "converged": converged,
                 "method": method,
                 "parameters": {
+                    # Record length. n_peaks, not n_systematic: the latter is
+                    # computed as "systematic and not censored"
+                    # (bulletin17c.py:1331), so it shrinks by one for every PILF
+                    # MGBT finds -- which would both double-report the PILF
+                    # column beside it and make the record appear to change
+                    # length when the threshold moves. n_peaks is every row the
+                    # fit used, matches peakfq's RecordLength, and is the same
+                    # count the frequency curve already annotates as "n = ...".
+                    "n_peaks": r.n_peaks,
                     "mean_log": r.mean_log,
                     "std_log": r.std_log,
                     "skew_station": r.skew_station,
@@ -206,6 +215,10 @@ def format_parameters_df(params: dict) -> pd.DataFrame:
     source = params.get("low_outlier_source", "MGBT")
     return pd.DataFrame(
         {
+            # First, because record length is the context for every other
+            # number in the row. Rendered as "n = 117" rather than a bare
+            # count, matching the annotation on the frequency curve.
+            "n": [f"n = {params.get('n_peaks', 0):,}"],
             "Mean (log10)": [f"{params.get('mean_log', 0):.4f}"],
             "Std Dev (log10)": [f"{params.get('std_log', 0):.4f}"],
             "Station Skew": [f"{params.get('skew_station', 0):.4f}"],
