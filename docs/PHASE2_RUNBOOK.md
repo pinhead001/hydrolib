@@ -3,9 +3,9 @@
 The Streamlit half of the split. Companion to `docs/REPO_SPLIT_PLAN.md` and
 `docs/PHASE1_RUNBOOK.md`.
 
-Working name below is **`hydrolib-app`**. It is a placeholder, not a decision —
-pick the name before Step 2, because renaming after the Streamlit Cloud repoint
-means doing that repoint twice.
+The repository is **`pinhead001/pyhydroapp`**, pairing with `pyhydrolib` on the
+`py-` prefix. Settled before Step 2 deliberately: renaming after the Streamlit
+Cloud repoint in Step 12 means performing that repoint twice.
 
 ---
 
@@ -79,7 +79,7 @@ why. Choose this only if you would rather not touch the Cloud config.
 ## Step 2 — Create the empty repository
 
 ```bash
-gh repo create pinhead001/hydrolib-app --public \
+gh repo create pinhead001/pyhydroapp --public \
   --description "Streamlit web app for Bulletin 17C flood frequency analysis"
 ```
 
@@ -91,9 +91,9 @@ auto-created file becomes a conflicting root commit.
 ## Step 3 — Push the full history
 
 ```bash
-git clone https://github.com/pinhead001/hydrolib hydrolib-app
-cd hydrolib-app
-git remote set-url origin https://github.com/pinhead001/hydrolib-app
+git clone https://github.com/pinhead001/hydrolib pyhydroapp
+cd pyhydroapp
+git remote set-url origin https://github.com/pinhead001/pyhydroapp
 git push -u origin main
 ```
 
@@ -315,7 +315,7 @@ is deployed on one interpreter.
 | `README.md` | Rewrite. Purpose, `pip install -r requirements.txt`, `streamlit run streamlit_app.py`, the live URL, Python ≥ 3.10, and a link to `pinhead001/pyhydrolib` for the analysis code |
 | `CLAUDE.md` | Rewrite. An agent instruction file describing a library that is no longer here will send the next session hunting for `vendor/peakfqr` and `make parity` |
 | `docs/vignette_streamlit_local.md` | Keep; update paths (`streamlit run streamlit_app.py`, no repo-root caveat) |
-| `docs/vignette_streamlit_web.md` | Keep; rewrite §"requirements.txt" and the main-file-path step for the flat layout |
+| `docs/vignette_streamlit_web.md` | Keep; rewrite §"requirements.txt" and the main-file-path step for the flat layout. L79's example deploy URL is derived from the repo and entry-point names, so it changes too |
 | `CHANGELOG.md` | Reset to `0.1.0` — the app's version is a display string, not a release contract |
 | `SECURITY.md`, `LICENSE` | Keep as-is |
 | `TODO.md`, `PRODUCTION.md` | Both are library documents. Delete, or keep only the app-relevant sections |
@@ -383,7 +383,7 @@ At [share.streamlit.io](https://share.streamlit.io), on the existing app:
 
 | Setting | New value |
 |---|---|
-| Repository | `pinhead001/hydrolib-app` |
+| Repository | `pinhead001/pyhydroapp` |
 | Branch | `main` |
 | Main file path | `streamlit_app.py` (was `app/streamlit_app.py`) |
 
@@ -414,7 +414,7 @@ Add a line to both new READMEs pointing back to it as the pre-split record.
 
 ## Done when
 
-- [ ] `hydrolib-app` CI green
+- [ ] `pyhydroapp` CI green
 - [ ] `pip install -r requirements.txt` resolves `pyhydrolib@v0.3.0` in a clean venv
 - [ ] Deployed app loads from the new repo and analyses a gage
 - [ ] No `sys.path` manipulation left in any file
