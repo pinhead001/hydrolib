@@ -206,7 +206,7 @@ Not required for the split to work — sequence it after.
 
 ## 5. Execution sequence
 
-### Phase 0 — Refactor in place (current repo)
+### Phase 0 — Refactor in place (current repo) — **DONE**
 
 1. Create `hydrolib/workflow.py`; move the §4.1 symbols; re-export from `__init__.py`.
 2. Reduce `app/ffa_runner.py` to the formatters; update its imports.
@@ -217,7 +217,16 @@ Not required for the split to work — sequence it after.
 5. `make check && make smoke` — both green before anything is forked.
 
 Phase 0 lands as a normal PR on `main`. It is independently valuable even if the split
-stalls.
+stalls. Done in `abfe9fb`: 502 passed, 5 xfailed, lint clean, and the packaged gage
+table verified from a clean venv install.
+
+Two items in §4 are deliberately **not** in Phase 0 and remain for the repo split:
+
+- The three `sys.path.insert` calls (§4.3). They are harmless while both trees share a
+  checkout, and `app/` moves to its own repo root in Phase 2 where the import situation
+  is different — removing them now would be a change made against conditions that are
+  about to stop applying.
+- `plot_frequency_curve_streamlit` (§4.8), which is a rename, not a boundary fix.
 
 ### Phase 1 — Create `pyhydrolib`
 
